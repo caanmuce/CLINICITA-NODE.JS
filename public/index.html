@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CliniCita �?" Gestión Inteligente de Citas Médicas</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/estilos.css">
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark navbar-clinicita sticky-top shadow">
+    <div class="container">
+        <a class="navbar-brand navbar-brand-text" href="index.html">
+            <i class="bi bi-heart-pulse-fill me-1"></i>Clini<span>Cita</span>
+        </a>
+        <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#navbarMain" aria-label="Menú de navegación">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarMain">
+            <ul class="navbar-nav me-auto gap-lg-1">
+                <li class="nav-item"><a class="nav-link active" href="#inicio">Inicio</a></li>
+                <li class="nav-item"><a class="nav-link" href="#contexto">El Proyecto</a></li>
+                <li class="nav-item"><a class="nav-link" href="#funcionalidades">Funcionalidades</a></li>
+                <li class="nav-item"><a class="nav-link" href="#usuarios">Usuarios</a></li>
+                <li class="nav-item"><a class="nav-link" href="pages/contacto.html">Contacto</a></li>
+            </ul>
+            <form class="d-flex me-3 my-2 my-lg-0" role="search">
+                <div class="input-group input-group-sm">
+                    <input class="form-control bg-transparent text-white border-secondary" type="search" name="q" placeholder="Buscar�?�" aria-label="Buscar">
+                    <button class="btn btn-outline-secondary btn-sm" type="submit"><i class="bi bi-search"></i></button>
+                </div>
+            </form>
+            <div class="d-flex gap-2 my-2 my-lg-0">
+                <a class="btn btn-outline-clinicita btn-sm" href="pages/login.html"><i class="bi bi-person me-1"></i>Iniciar Sesión</a>
+                <a class="btn btn-clinicita btn-sm" href="pages/registro.html">Registrarse</a>
+            </div>
+        </div>
+        <div class="d-none d-lg-flex ms-3 align-items-center">
+            <a href="pages/login.html" class="text-white fs-5" aria-label="Notificaciones">
+                <i class="bi bi-bell"></i>
+            </a>
+        </div>
+    </div>
+</nav>
+
+<section class="hero-section" id="inicio">
+    <div class="hero-bg-overlay"></div>
+    <div class="container position-relative py-5">
+        <div class="row align-items-center g-5">
+            <div class="col-12 col-lg-6">
+                <div class="hero-badge"><i class="bi bi-shield-check me-1"></i>Plataforma médica certificada</div>
+                <h1 class="hero-title mb-4">
+                    Agenda tu cita<br>médica de forma<br>
+                    <span class="accent">inteligente</span>
+                </h1>
+                <p class="hero-lead mb-4">
+                    CliniCita reduce el ausentismo en citas médicas mediante recordatorios automáticos,
+                    listas de espera inteligentes y un portal accesible desde cualquier dispositivo.
+                </p>
+                <div class="d-flex flex-wrap gap-3 mb-5">
+                    <a class="btn btn-clinicita px-4 py-2" href="pages/login.html">
+                        <i class="bi bi-calendar-plus me-2"></i>Agendar Cita
+                    </a>
+                    <a href="#contexto" class="btn btn-outline-clinicita px-4 py-2">
+                        Conocer más <i class="bi bi-arrow-down ms-1"></i>
+                    </a>
+                </div>
+                <div class="row g-3">
+                    <div class="col-4">
+                        <div class="hero-stat">
+                            <div class="stat-num">83%</div>
+                            <div class="stat-label">colombianos con barreras de acceso</div>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="hero-stat">
+                            <div class="stat-num">70%</div>
+                            <div class="stat-label">señalan falta de citas como obstáculo</div>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="hero-stat">
+                            <div class="stat-num">30%</div>
+                            <div class="stat-label">reducción costos con digitalización</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-lg-6 d-none d-lg-block">
+                <div class="hero-image-card">
+                    <div class="mock-calendar">
+                        <div class="mock-cal-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-calendar3 me-2"></i>Agenda del día</span>
+                            <span class="badge bg-white text-success">En línea</span>
+                        </div>
+                        <div class="mock-cal-body">
+                            <div class="empty-preview">
+                                <i class="bi bi-calendar-x"></i>
+                                Sin citas para mostrar.
+                                <br><small>Las citas se cargarán desde la base de datos.</small>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="text-center mt-3 mb-0" style="color:rgba(255,255,255,.5);font-size:.78rem;">
+                        <i class="bi bi-shield-lock me-1"></i>Datos protegidos �?" Ley 1581 de 2012
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="mb-0">
+    <div id="clinicitaCarousel" class="carousel slide" data-bs-ride="carousel">
+        <div class="carousel-inner">
+            <div class="carousel-item active">
+                <img src="https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?w=1400&auto=format&fit=crop" class="d-block w-100" alt="Clínica moderna">
+                <div class="carousel-caption d-none d-md-flex align-items-end pb-4 justify-content-start ps-5">
+                    <div class="carousel-caption-custom">
+                        <h4 class="fw-bold mb-1">Gestión sin fricciones</h4>
+                        <p class="mb-0 small">Pacientes, médicos y recepcionistas en un solo sistema integrado.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="carousel-item">
+                <img src="https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?w=1400&auto=format&fit=crop" class="d-block w-100" alt="Médico con tablet">
+                <div class="carousel-caption d-none d-md-flex align-items-end pb-4 justify-content-start ps-5">
+                    <div class="carousel-caption-custom">
+                        <h4 class="fw-bold mb-1">Recordatorios por WhatsApp</h4>
+                        <p class="mb-0 small">Notificaciones automáticas 24h antes de cada cita para reducir inasistencias.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="carousel-item">
+                <img src="https://images.unsplash.com/photo-1551190822-a9333d879b1f?w=1400&auto=format&fit=crop" class="d-block w-100" alt="Tecnología médica">
+                <div class="carousel-caption d-none d-md-flex align-items-end pb-4 justify-content-start ps-5">
+                    <div class="carousel-caption-custom">
+                        <h4 class="fw-bold mb-1">Lista de espera inteligente</h4>
+                        <p class="mb-0 small">Cupos liberados se asignan automáticamente al siguiente paciente prioritario.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <button class="carousel-control-prev" type="button" data-bs-target="#clinicitaCarousel" data-bs-slide="prev">
+            <span class="carousel-control-prev-icon"></span>
+            <span class="visually-hidden">Anterior</span>
+        </button>
+        <button class="carousel-control-next" type="button" data-bs-target="#clinicitaCarousel" data-bs-slide="next">
+            <span class="carousel-control-next-icon"></span>
+            <span class="visually-hidden">Siguiente</span>
+        </button>
+        <div class="carousel-indicators">
+            <button type="button" data-bs-target="#clinicitaCarousel" data-bs-slide-to="0" class="active"></button>
+            <button type="button" data-bs-target="#clinicitaCarousel" data-bs-slide-to="1"></button>
+            <button type="button" data-bs-target="#clinicitaCarousel" data-bs-slide-to="2"></button>
+        </div>
+    </div>
+</section>
+
+<section class="context-section py-5" id="contexto" style="padding-top:5rem;padding-bottom:5rem;">
+    <div class="container">
+        <div class="text-center mb-5">
+            <div class="section-eyebrow mb-2">Contexto del Proyecto</div>
+            <h2 class="section-title">¿Por qué existe <em>CliniCita</em>?</h2>
+            <p class="text-muted mx-auto mt-3" style="max-width:600px;">
+                Un sistema de salud más eficiente comienza con una cita que sí se cumple.
+            </p>
+        </div>
+        <div class="row g-4">
+            <div class="col-12 col-md-4">
+                <div class="context-card">
+                    <div class="context-icon"><i class="bi bi-exclamation-triangle-fill"></i></div>
+                    <h5 class="fw-bold mb-3">La Problemática</h5>
+                    <p class="text-muted small mb-2">
+                        El ausentismo a citas médicas genera pérdidas de
+                        <strong>$16.000 millones anuales</strong> solo en Bogotá.
+                        El 83 % de los colombianos enfrenta al menos una barrera para acceder a atención médica.
+                    </p>
+                    <span class="badge" style="background:var(--clinicita-sky);color:var(--clinicita-teal);">Colombia · Sector Salud</span>
+                </div>
+            </div>
+            <div class="col-12 col-md-4">
+                <div class="context-card" style="border-left-color:#2563EB;">
+                    <div class="context-icon" style="background:#DBEAFE;color:#2563EB;"><i class="bi bi-building-fill-check"></i></div>
+                    <h5 class="fw-bold mb-3">El Entorno</h5>
+                    <p class="text-muted small mb-2">
+                        Colombia avanza hacia la digitalización en salud. Desde 2026 es obligatorio el
+                        <strong>Resumen Digital de Atención en Salud (RDA)</strong> (Resolución 1888 de 2025).
+                    </p>
+                    <span class="badge" style="background:#DBEAFE;color:#2563EB;">Transformación Digital 2026</span>
+                </div>
+            </div>
+            <div class="col-12 col-md-4">
+                <div class="context-card" style="border-left-color:var(--clinicita-accent);">
+                    <div class="context-icon" style="background:#FEF3C7;color:#D97706;"><i class="bi bi-lightbulb-fill"></i></div>
+                    <h5 class="fw-bold mb-3">Nuestra Propuesta</h5>
+                    <p class="text-muted small mb-2">
+                        <strong>CliniCita</strong> automatiza el agendamiento, integra recordatorios por
+                        WhatsApp, SMS y correo, y gestiona listas de espera con prioridad.
+                    </p>
+                    <span class="badge" style="background:#FEF3C7;color:#D97706;">Ley 1581 · HABEAS DATA</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<div class="stats-banner py-4">
+    <div class="container">
+        <div class="row g-0 text-center">
+            <div class="col-6 col-md-3"><div class="stat-box"><div class="num">83%</div><div class="lbl">Colombianos con barreras de acceso</div></div></div>
+            <div class="col-6 col-md-3"><div class="stat-box"><div class="num">$16B</div><div class="lbl">Pérdidas anuales en Bogotá por ausentismo</div></div></div>
+            <div class="col-6 col-md-3"><div class="stat-box"><div class="num">30%</div><div class="lbl">Reducción de costos operativos con digitalización</div></div></div>
+            <div class="col-6 col-md-3"><div class="stat-box"><div class="num">165M</div><div class="lbl">Teleconsultas realizadas en Colombia</div></div></div>
+        </div>
+    </div>
+</div>
+
+<section class="features-section py-5" id="funcionalidades" style="padding-top:5rem;padding-bottom:5rem;">
+    <div class="container">
+        <div class="text-center mb-5">
+            <div class="section-eyebrow mb-2">Plataforma</div>
+            <h2 class="section-title">Funcionalidades</h2>
+        </div>
+        <div class="row g-4">
+            <div class="col-md-6 col-lg-4">
+                <div class="feature-card">
+                    <div class="feature-icon fi-teal"><i class="bi bi-calendar-plus"></i></div>
+                    <h5 class="fw-bold">Agendamiento en línea</h5>
+                    <p class="text-muted small mb-0">Pacientes solicitan, consultan, modifican o cancelan citas desde cualquier dispositivo.</p>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4">
+                <div class="feature-card">
+                    <div class="feature-icon fi-amber"><i class="bi bi-whatsapp"></i></div>
+                    <h5 class="fw-bold">Recordatorios automáticos</h5>
+                    <p class="text-muted small mb-0">Notificaciones por WhatsApp, SMS y correo 24 horas antes de la cita.</p>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4">
+                <div class="feature-card">
+                    <div class="feature-icon fi-blue"><i class="bi bi-hourglass-split"></i></div>
+                    <h5 class="fw-bold">Lista de espera</h5>
+                    <p class="text-muted small mb-0">Los cupos liberados se reasignan según prioridad definida por la IPS.</p>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4">
+                <div class="feature-card">
+                    <div class="feature-icon fi-rose"><i class="bi bi-people"></i></div>
+                    <h5 class="fw-bold">Roles del sistema</h5>
+                    <p class="text-muted small mb-0">Acceso diferenciado para paciente, médico, recepcionista y administrador.</p>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4">
+                <div class="feature-card">
+                    <div class="feature-icon fi-violet"><i class="bi bi-graph-up"></i></div>
+                    <h5 class="fw-bold">Reportes de ausentismo</h5>
+                    <p class="text-muted small mb-0">Indicadores de inasistencia e impacto operativo para la gerencia.</p>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4">
+                <div class="feature-card">
+                    <div class="feature-icon fi-slate"><i class="bi bi-shield-lock"></i></div>
+                    <h5 class="fw-bold">Protección de datos</h5>
+                    <p class="text-muted small mb-0">Tratamiento de datos sensibles alineado con la Ley 1581 de 2012.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="users-section py-5" id="usuarios" style="padding-top:5rem!important;padding-bottom:5rem!important;">
+    <div class="container">
+        <div class="text-center mb-5">
+            <div class="section-eyebrow mb-2" style="color:#5EEAD4;">Roles del Sistema</div>
+            <h2 class="section-title text-white">¿Quiénes usan <em>CliniCita</em>?</h2>
+        </div>
+        <div class="row g-4 justify-content-center">
+            <div class="col-12 col-sm-6 col-lg-3">
+                <div class="user-card">
+                    <div class="user-avatar"><i class="bi bi-person-heart"></i></div>
+                    <h6 class="fw-bold text-white mb-2">Paciente</h6>
+                    <p class="small mb-3" style="color:rgba(255,255,255,.6);">Agenda, consulta y modifica citas. Recibe recordatorios y confirma asistencia.</p>
+                    <a href="paciente/dashboard.html" class="badge text-decoration-none" style="background:rgba(13,148,136,.25);color:#5EEAD4;">Ir al panel</a>
+                </div>
+            </div>
+            <div class="col-12 col-sm-6 col-lg-3">
+                <div class="user-card">
+                    <div class="user-avatar" style="background:#2563EB;"><i class="bi bi-hospital"></i></div>
+                    <h6 class="fw-bold text-white mb-2">Médico</h6>
+                    <p class="small mb-3" style="color:rgba(255,255,255,.6);">Consulta la lista de asistencia diaria y el estado de cada cita.</p>
+                    <a href="medico/agenda.html" class="badge text-decoration-none" style="background:rgba(37,99,235,.25);color:#93C5FD;">Ir al panel</a>
+                </div>
+            </div>
+            <div class="col-12 col-sm-6 col-lg-3">
+                <div class="user-card">
+                    <div class="user-avatar" style="background:#D97706;"><i class="bi bi-headset"></i></div>
+                    <h6 class="fw-bold text-white mb-2">Recepcionista</h6>
+                    <p class="small mb-3" style="color:rgba(255,255,255,.6);">Gestiona, reprograma citas y administra la lista de espera.</p>
+                    <a href="recepcionista/citas.html" class="badge text-decoration-none" style="background:rgba(217,119,6,.25);color:#FCD34D;">Ir al panel</a>
+                </div>
+            </div>
+            <div class="col-12 col-sm-6 col-lg-3">
+                <div class="user-card">
+                    <div class="user-avatar" style="background:#7C3AED;"><i class="bi bi-bar-chart-fill"></i></div>
+                    <h6 class="fw-bold text-white mb-2">Administrador</h6>
+                    <p class="small mb-3" style="color:rgba(255,255,255,.6);">Usuarios, especialidades, horarios y reportes de ausentismo.</p>
+                    <a href="admin/dashboard.html" class="badge text-decoration-none" style="background:rgba(124,58,237,.25);color:#C4B5FD;">Ir al panel</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<footer class="footer-clinicita pt-5 pb-3">
+    <div class="container">
+        <div class="row g-4">
+            <div class="col-md-4">
+                <div class="footer-brand mb-3"><i class="bi bi-heart-pulse-fill me-1"></i>Clini<span>Cita</span></div>
+                <p class="small">Plataforma web de gestión inteligente de citas médicas. Cumple con la Ley 1581 de 2012.</p>
+                <div class="d-flex gap-2 mt-3">
+                    <a href="#" class="social-icon" aria-label="Facebook"><i class="bi bi-facebook"></i></a>
+                    <a href="#" class="social-icon" aria-label="Instagram"><i class="bi bi-instagram"></i></a>
+                    <a href="#" class="social-icon" aria-label="X"><i class="bi bi-twitter-x"></i></a>
+                    <a href="#" class="social-icon" aria-label="LinkedIn"><i class="bi bi-linkedin"></i></a>
+                </div>
+            </div>
+            <div class="col-6 col-md-2">
+                <h6 class="text-white mb-3">Plataforma</h6>
+                <ul class="list-unstyled small">
+                    <li class="mb-1"><a href="#inicio">Inicio</a></li>
+                    <li class="mb-1"><a href="#contexto">El Proyecto</a></li>
+                    <li class="mb-1"><a href="#funcionalidades">Funcionalidades</a></li>
+                    <li class="mb-1"><a href="#usuarios">Roles</a></li>
+                </ul>
+            </div>
+            <div class="col-6 col-md-2">
+                <h6 class="text-white mb-3">Soporte</h6>
+                <ul class="list-unstyled small">
+                    <li class="mb-1"><a href="pages/ayuda.html">Centro de Ayuda</a></li>
+                    <li class="mb-1"><a href="pages/privacidad.html">Privacidad (Ley 1581)</a></li>
+                    <li class="mb-1"><a href="pages/terminos.html">Términos de Uso</a></li>
+                    <li class="mb-1"><a href="pages/contacto.html">Contacto</a></li>
+                </ul>
+            </div>
+            <div class="col-md-4">
+                <h6 class="text-white mb-3">Mantente informado</h6>
+                <p class="small mb-3">Recibe noticias sobre actualizaciones de CliniCita.</p>
+                <form data-form="newsletter">
+                    <div class="input-group input-group-sm">
+                        <input class="form-control bg-transparent text-white border-secondary" type="email" name="correo" placeholder="tu@correo.com" required>
+                        <button class="btn btn-clinicita" type="submit">Suscribirse</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <hr class="my-4" style="border-color:rgba(255,255,255,.1);">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-center gap-2 small">
+            <p class="mb-0">&copy; 2026 CliniCita Colombia �?" Equipo ADSO · SENA</p>
+            <p class="mb-0" style="color:rgba(255,255,255,.4);">Desarrollado ADSO · SENA</p>
+        </div>
+    </div>
+</footer>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+<script src="assets/js/app.js"></script>
+</body>
+</html>
+

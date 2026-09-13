@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Agenda médica | CliniCita</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../../assets/css/estilos.css">
+</head>
+<body class="app-shell">
+<div class="container-fluid">
+    <div class="row">
+        <aside class="col-lg-2 app-sidebar">
+            <a class="navbar-brand-text d-block mb-4 text-decoration-none" href="../../index.html"><i class="bi bi-heart-pulse-fill me-1"></i>Clini<span>Cita</span></a>
+            <p class="small text-white-50 mb-3">Médico</p>
+            <nav class="nav flex-column">
+                <a class="nav-link active" href="agenda.html"><i class="bi bi-calendar3 me-2"></i>Agenda del día</a>
+                <a class="nav-link" href="../../pages/login.html"><i class="bi bi-box-arrow-left me-2"></i>Salir</a>
+            </nav>
+        </aside>
+        <main class="col-lg-10 app-content">
+            <div class="d-flex flex-wrap gap-3 justify-content-between align-items-center mb-4">
+                <h1 class="h3 mb-0">Agenda del día</h1>
+                <form class="d-flex gap-2" id="filtro-fecha">
+                    <input class="form-control" type="date" name="fecha" aria-label="Fecha de agenda">
+                    <button class="btn btn-outline-clinicita" type="button">Filtrar</button>
+                </form>
+            </div>
+            <div class="row g-3 mb-4">
+                <div class="col-md-3"><div class="kpi-card"><div class="small text-muted">Confirmadas</div><div class="kpi-value">0</div></div></div>
+                <div class="col-md-3"><div class="kpi-card"><div class="small text-muted">Pendientes</div><div class="kpi-value">0</div></div></div>
+                <div class="col-md-3"><div class="kpi-card"><div class="small text-muted">Canceladas</div><div class="kpi-value">0</div></div></div>
+                <div class="col-md-3"><div class="kpi-card"><div class="small text-muted">Atendidas</div><div class="kpi-value">0</div></div></div>
+            </div>
+            <div class="panel-card">
+                <div class="table-responsive">
+                    <table class="table align-middle">
+                        <thead>
+                            <tr>
+                                <th>Hora</th>
+                                <th>Paciente</th>
+                                <th>Documento</th>
+                                <th>Motivo</th>
+                                <th>Estado</th>
+                                <th>Asistencia</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabla-agenda">
+                            <!-- TODO: GET /api/citas?medico=me&fecha= -->
+                        </tbody>
+                    </table>
+                </div>
+                <div class="empty-state">
+                    <i class="bi bi-clipboard2-pulse"></i>
+                    No hay pacientes en la agenda para esta fecha.
+                </div>
+            </div>
+        </main>
+    </div>
+</div>
+<script src="../../assets/js/app.js"></script>
+</body>
+</html>
+
