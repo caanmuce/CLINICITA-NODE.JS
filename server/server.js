@@ -297,3 +297,4 @@ initializeAuth()
         console.error("No fue posible preparar la autenticación:", error);
         process.exit(1);
     });
+    //HOLA CAMILO

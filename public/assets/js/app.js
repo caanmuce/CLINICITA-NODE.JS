@@ -114,6 +114,9 @@ document.addEventListener("submit", (evento) => {
 });
 
 document.addEventListener("DOMContentLoaded", () => {
+    pintarSesion();
+    cargarCitasHero();
+
     const usuario = JSON.parse(localStorage.getItem("clinicita_usuario") || "null");
     const ruta = window.location.pathname;
     const paneles = {
@@ -128,10 +131,15 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (document.querySelector('[data-form="agendar"]')) cargarFormularioCita();
-    if (document.getElementById("tabla-citas")) {
-        cargarMisCitas();
-        window.setInterval(cargarMisCitas, 15000);
-    }
+            if (document.getElementById("tabla-citas")) {
+                cargarMisCitas();
+                window.setInterval(cargarMisCitas, 15000);
+            }
+
+            if (document.getElementById("empty-proxima")) {
+                cargarProximaCita();
+                window.setInterval(cargarProximaCita, 15000);
+            }
 });
 
 async function cargarFormularioCita() {
@@ -195,6 +203,125 @@ async function cargarMisCitas() {
             tabla.appendChild(fila);
         });
         vacio.classList.toggle("d-none", respuesta.citas.length > 0);
+    } catch (error) {
+        mostrarAlerta(error.message, "danger");
+    }
+}
+
+const coloresEspecialidad = {}; // caché para que la misma especialidad siempre tenga el mismo color
+const paletaColores = [
+    "#0D9488", // teal
+    "#2563EB", // azul
+    "#D97706", // ámbar
+    "#DB2777", // rosa
+    "#7C3AED", // violeta
+    "#059669", // verde
+    "#DC2626", // rojo
+    "#4F46E5"  // índigo
+];
+
+function colorPorEspecialidad(especialidad) {
+    if (!coloresEspecialidad[especialidad]) {
+        const indice = Object.keys(coloresEspecialidad).length % paletaColores.length;
+        coloresEspecialidad[especialidad] = paletaColores[indice];
+    }
+    return coloresEspecialidad[especialidad];
+}
+
+function pintarSesion() {
+    const usuario = JSON.parse(localStorage.getItem("clinicita_usuario") || "null");
+    const zona = document.getElementById("zona-sesion");
+    if (!zona) return;
+
+    if (!usuario) return;
+
+    const destinos = {
+        paciente: "roles/paciente/dashboard.html",
+        medico: "roles/medico/agenda.html",
+        recepcionista: "roles/recepcionista/citas.html",
+        administrador: "roles/admin/dashboard.html"
+    };
+
+    zona.innerHTML = `
+        <span class="text-white small me-2">Bienvenido, ${usuario.nombre}</span>
+        <a class="btn btn-clinicita btn-sm" href="${destinos[usuario.rol] || '#'}">Mi panel</a>
+        <button class="btn btn-outline-clinicita btn-sm" id="btn-logout">Cerrar sesión</button>
+    `;
+
+    document.getElementById("btn-logout").addEventListener("click", () => {
+        localStorage.removeItem("clinicita_token");
+        localStorage.removeItem("clinicita_usuario");
+        window.location.reload();
+    });
+}
+
+async function cargarCitasHero() {
+    const contenedor = document.getElementById("mock-cal-body");
+    const usuario = JSON.parse(localStorage.getItem("clinicita_usuario") || "null");
+    if (!contenedor || !usuario) return; // no logueado: se queda el mensaje original
+
+    try {
+        const respuesta = await api("/citas");
+        if (!respuesta.citas.length) return; // sin citas: se queda el mensaje original
+
+        contenedor.innerHTML = "";
+
+const ahora = new Date();
+const proximas = respuesta.citas
+    .filter((cita) => new Date(`${cita.fecha}T${cita.hora}`) >= ahora)
+    .sort((a, b) => new Date(`${a.fecha}T${a.hora}`) - new Date(`${b.fecha}T${b.hora}`))
+    .slice(0, 5);
+
+if (!proximas.length) return; // no hay próximas citas: se queda el mensaje original
+
+proximas.forEach((cita) => {
+    const color = colorPorEspecialidad(cita.especialidad);
+    const item = document.createElement("div");
+    item.className = "d-flex justify-content-between align-items-center py-2 border-bottom border-secondary";
+    item.innerHTML = `
+        <span>${cita.fecha} · ${cita.hora}</span>
+        <span class="badge" style="background:${color};color:#fff;">${cita.especialidad}</span>
+    `;
+    contenedor.appendChild(item);
+});
+    } catch (error) {
+        console.warn("No se pudieron cargar citas en el hero:", error.message);
+        // no mostramos alerta aquí: es solo un preview decorativo, no crítico
+    }
+}
+
+async function cargarProximaCita() {
+    const vacio = document.getElementById("empty-proxima");
+    const contenido = document.getElementById("contenido-proxima");
+    if (!vacio || !contenido) return;
+
+    try {
+        const respuesta = await api("/citas");
+
+        const ahora = new Date();
+        const proximas = respuesta.citas
+            .filter((cita) => cita.estado !== "Cancelada" && new Date(`${cita.fecha}T${cita.hora}`) >= ahora)
+            .sort((a, b) => new Date(`${a.fecha}T${a.hora}`) - new Date(`${b.fecha}T${b.hora}`));
+
+        if (!proximas.length) {
+            vacio.classList.remove("d-none");
+            contenido.classList.add("d-none");
+            return;
+        }
+
+        const cita = proximas[0];
+        document.getElementById("proxima-fecha").textContent = cita.fecha;
+        document.getElementById("proxima-hora").textContent = cita.hora;
+        document.getElementById("proxima-medico").textContent = cita.medico;
+        document.getElementById("proxima-estado").textContent = cita.estado;
+
+        const badge = document.getElementById("proxima-especialidad");
+        badge.textContent = cita.especialidad;
+        badge.style.background = colorPorEspecialidad(cita.especialidad);
+        badge.style.color = "#fff";
+
+        vacio.classList.add("d-none");
+        contenido.classList.remove("d-none");
     } catch (error) {
         mostrarAlerta(error.message, "danger");
     }
