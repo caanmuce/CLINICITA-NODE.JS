@@ -380,7 +380,15 @@ async function enviarRecordatorios({ client, query }) {
         }
         const fecha = fechaCitaActual.toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" });
         const enviado = await enviarWhatsApp(client, telefono, `Hola ${cita.paciente}. Te recordamos tu cita médica el ${fecha}. Responde CONFIRMAR o CANCELAR.`);
-        if (!enviado) continue;
+
+        if (!enviado) {
+            // Antes: se ignoraba el fallo con "continue" y el registro
+            // se quedaba en "Pendiente" para siempre, sin dejar rastro
+            // de que se intentó enviar y falló.
+            await query("UPDATE recordatorios SET fecha_envio = NOW(), estado_entrega = 'Fallido' WHERE cita_id = ?", [cita.cita_id]);
+            continue;
+        }
+
         await query("UPDATE citas SET recordatorio_enviado = 1 WHERE cita_id = ?", [cita.cita_id]);
         await query("UPDATE recordatorios SET fecha_envio = NOW(), estado_entrega = 'Enviado' WHERE cita_id = ?", [cita.cita_id]);
     }
