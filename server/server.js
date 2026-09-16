@@ -391,3 +391,58 @@ app.delete("/api/citas/:id", requireAuth, requireRole("paciente"), async (req, r
     await query("UPDATE citas SET estado = 'Cancelada' WHERE cita_id = ?", [req.params.id]);
     res.json({ mensaje: "Cita cancelada correctamente" });
 })
+
+/**
+ * Cuenta las citas del paciente autenticado que tengan un estado
+ * específico, indicado como parte de la URL (ej. /api/citas/Pendiente/count).
+ *
+ * Reemplaza a las rutas separadas /api/citas/pendientes/count y
+ * /api/citas/canceladas/count con una sola ruta reutilizable para
+ * cualquier estado válido de una cita.
+ *
+ */
+app.get("/api/citas/:estado/count", requireAuth, requireRole("paciente"), async (req, res) => {
+    // Lista blanca de los únicos valores permitidos para "estado".
+    // Debe coincidir exactamente con el ENUM definido en la columna
+    // citas.estado de la base de datos.
+    const estadosValidos = ["Pendiente", "Confirmada", "Cancelada", "Completada", "No-Asistio"];
+
+    // req.params.estado toma el valor de la URL en la posición ":estado".
+    // Por ejemplo, en GET /api/citas/Pendiente/count, esto sería "Pendiente".
+    const estado = req.params.estado;
+
+    // Verifica que lo que llegó en la URL sea uno de los estados
+    // permitidos. Esto es una medida de seguridad y de integridad:
+    // sin esta validación, alguien podría mandar cualquier texto en
+    // la URL (ej. /api/citas/loquesea/count) y aunque no rompería
+    // nada grave aquí (la consulta simplemente no encontraría
+    // coincidencias), sí sería una entrada no controlada llegando
+    // directo a una consulta SQL.
+    if (!estadosValidos.includes(estado)) return res.status(400).json({ mensaje: "Estado no válido" });
+
+    // Traduce el usuario_id del token (req.user.id) al paciente_id
+    // real, ya que la tabla "citas" se relaciona por paciente_id.
+    const users = await query("SELECT paciente_id FROM usuarios WHERE usuario_id = ? AND rol = 'paciente' AND activo = 1", [req.user.id]);
+
+    // Toma el paciente_id de la primera fila encontrada. El "?."
+    // evita un error si "users" viniera vacío (usuario sin paciente
+    // asociado, o desactivado) — en ese caso queda undefined en vez
+    // de lanzar una excepción.
+    const pacienteId = users[0]?.paciente_id;
+
+    // Si no hay paciente asociado, corta la petición con un error
+    // controlado (400) antes de intentar consultar citas con un
+    // pacienteId inexistente.
+    if (!pacienteId) return res.status(400).json({ mensaje: "El usuario no está asociado a un paciente" });
+
+    // Cuenta cuántas citas de ESTE paciente tienen exactamente el
+    // estado pedido. Como "estado" ya fue validado contra la lista
+    // blanca de arriba, es seguro pasarlo como parámetro preparado
+    // (el "?" en la consulta) sin riesgo de inyección SQL.
+    const result = await query("SELECT COUNT(*) AS total_citas FROM citas WHERE paciente_id = ? AND estado = ?", [pacienteId, estado]);
+
+    // El resultado de una consulta SQL siempre es un arreglo, aunque
+    // sea un solo valor — por eso result[0].total_citas, en vez de
+    // result.total_citas directamente.
+    res.json({ total_citas: result[0].total_citas });
+});

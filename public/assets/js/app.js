@@ -140,7 +140,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (document.querySelector('[data-form="agendar"]')) cargarFormularioCita();
-            if (document.getElementById("tabla-citas")) {
+            if (document.getElementById("tabla-pendientes")) {
                 cargarMisCitas();
                 window.setInterval(cargarMisCitas, 15000);
             }
@@ -149,6 +149,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 cargarProximaCita();
                 window.setInterval(cargarProximaCita, 15000);
             }
+
+            if (document.getElementById("kpi-proximas")) {
+                numerosDelKpi();
+                window.setInterval(numerosDelKpi, 15000);
+            }  
 });
 
 async function cargarFormularioCita() {
@@ -194,84 +199,109 @@ async function cargarHorarios() {
 }
 
 /**
- * Carga y pinta en pantalla las citas del paciente autenticado,
- * llenando una tabla HTML con una fila por cada cita.
+ * Carga las citas del paciente autenticado y las distribuye en TRES
+ * tablas separadas según su estado (Pendiente, Confirmada, Cancelada),
+ * cada una con su propio mensaje de "vacío" independiente.
  *
- * Requiere que la página tenga:
- *   - un elemento con id="tabla-citas" (normalmente un <tbody>,
- *     donde se van a insertar las filas <tr>)
- *   - un elemento con id="empty-citas" (un mensaje/estado vacío
- *     que se muestra u oculta según si hay citas o no)
+ * Requiere que la página tenga, para cada uno de los tres estados:
+ *   - un <tbody> con id "tabla-pendientes" / "tabla-confirmadas" / "tabla-canceladas"
+ *   - un elemento con id "empty-pendientes" / "empty-confirmadas" / "empty-canceladas"
  */
 async function cargarMisCitas() {
-    // Referencias a los dos elementos del HTML que esta función
-    // necesita modificar: el cuerpo de la tabla y el mensaje de
-    // "no tienes citas" que se muestra cuando la lista viene vacía.
-    const tabla = document.getElementById("tabla-citas");
-    const vacio = document.getElementById("empty-citas");
+    // Mapa de configuración: por cada estado posible de una cita, define
+    // a qué tabla va, qué elemento mostrar si esa tabla queda vacía, y si
+    // esa categoría debe mostrar los botones de Cancelar/Reprogramar.
+    // (Las citas canceladas no necesitan esos botones, por eso acciones: false).
+    const grupos = {
+        Pendiente: { tabla: document.getElementById("tabla-pendientes"), vacio: document.getElementById("empty-pendientes"), acciones: true },
+        Confirmada: { tabla: document.getElementById("tabla-confirmadas"), vacio: document.getElementById("empty-confirmadas"), acciones: true },
+        Cancelada: { tabla: document.getElementById("tabla-canceladas"), vacio: document.getElementById("empty-canceladas"), acciones: false }
+    };
+
+    // Guarda de seguridad: si esta página no tiene ni siquiera la primera
+    // tabla (tabla-pendientes), asumimos que ninguna de las tres existe
+    // aquí, y no tiene sentido seguir ejecutando el resto de la función.
+    if (!grupos.Pendiente.tabla) return;
 
     try {
         // Le pregunta al servidor por las citas del usuario logueado.
-        // api() ya se encarga de mandar el token guardado en el
-        // header Authorization, así que el backend sabe de quién
-        // pedir la información (ver GET /api/citas -> requireAuth).
+        // api() ya agrega el token de sesión automáticamente.
         const respuesta = await api("/citas");
 
-        // Limpia la tabla antes de rellenarla. Esto es importante
-        // porque cargarMisCitas() se llama repetidamente cada 15
-        // segundos (setInterval) — sin este paso, cada actualización
-        // agregaría filas duplicadas encima de las anteriores en
-        // vez de reemplazarlas.
-        tabla.innerHTML = "";
-
-        // Ordena las citas de la más próxima a la más lejana en el
-        // tiempo, combinando fecha y hora en un solo objeto Date
-        // para poder compararlas correctamente.
+        // Ordena todas las citas de la más próxima a la más lejana en
+        // el tiempo, combinando fecha+hora en un objeto Date para
+        // poder compararlas correctamente.
         const citasOrdenadas = [...respuesta.citas].sort(
             (a, b) => new Date(`${a.fecha}T${a.hora}`) - new Date(`${b.fecha}T${b.hora}`)
         );
 
-        // Por cada cita ya ordenada, arma una fila <tr> nueva.
-        citasOrdenadas.forEach((cita) => {
-            const fila = document.createElement("tr");
+        // Vacía las tres tablas antes de rellenarlas. Necesario porque
+        // esta función se llama repetidamente (setInterval) — sin esto,
+        // cada actualización iría acumulando filas duplicadas.
+        Object.values(grupos).forEach((grupo) => { grupo.tabla.innerHTML = ""; });
 
-            [cita.fecha, cita.hora, cita.especialidad, cita.medico, cita.estado].forEach((valor) => {
+        // Lleva la cuenta de cuántas citas terminaron en cada categoría.
+        // Se usa al final para decidir qué mensajes de "vacío" mostrar.
+        const conteo = { Pendiente: 0, Confirmada: 0, Cancelada: 0 };
+
+        // Recorre cada cita YA ordenada y la enruta a su tabla correcta
+        // según el valor de cita.estado.
+        citasOrdenadas.forEach((cita) => {
+            // Busca en "grupos" la configuración correspondiente al
+            // estado de esta cita en particular.
+            const grupo = grupos[cita.estado];
+
+            // Si el estado de la cita no tiene una tabla asociada aquí
+            // (por ejemplo "Completada" o "No-Asistio", que existen en
+            // la base de datos pero no tienen sección en esta página),
+            // simplemente se ignora esa cita y se sigue con la siguiente.
+            if (!grupo) return;
+
+            // Suma uno al contador de esa categoría específica.
+            conteo[cita.estado]++;
+
+            // Crea la fila <tr> con los datos básicos de la cita.
+            const fila = document.createElement("tr");
+            [cita.fecha, cita.hora, cita.especialidad, cita.medico].forEach((valor) => {
                 const celda = document.createElement("td");
                 celda.textContent = valor;
                 fila.appendChild(celda);
             });
 
-            // Columna extra de "acciones" (pensada para futuros
-            // botones de cancelar/reprogramar), que por ahora solo
-            // muestra un guion como placeholder.
-            const acciones = document.createElement("td");
-            acciones.innerHTML = `
-                                <button class="btn btn-outline-danger btn-sm me-1" id="cancelar-${cita.cita_id}" data-accion="cancelar" data-cita-id="${cita.cita_id}">
-                                    <i class="bi bi-x-circle">Cancelar</i>
-                                </button>
-                                <button class="btn btn-outline-clinicita btn-sm" id="reprogramar-${cita.cita_id}" data-accion="reprogramar" data-cita-id="${cita.cita_id}">
-                                    <i class="bi bi-arrow-repeat">Reprogramar</i>
-                                </button>
-                            `;;
-            fila.appendChild(acciones);
+            // Solo agrega la columna de botones si esta categoría los
+            // necesita (grupo.acciones === true). Las citas canceladas
+            // no entran aquí porque su grupo tiene acciones: false.
+            if (grupo.acciones) {
+                const acciones = document.createElement("td");
+                acciones.innerHTML = `
+                    <button class="btn btn-outline-danger btn-sm me-1" data-accion="cancelar" data-cita-id="${cita.cita_id}">
+                        <i class="bi bi-x-circle"></i>
+                    </button>
+                    <button class="btn btn-outline-clinicita btn-sm" data-accion="reprogramar" data-cita-id="${cita.cita_id}">
+                        <i class="bi bi-arrow-repeat"></i>
+                    </button>
+                `;
+                fila.appendChild(acciones);
+            }
 
-            // Inserta la fila ya armada dentro de la tabla.
-            tabla.appendChild(fila);
+            // Inserta la fila ya armada en la tabla que le corresponde
+            // según su estado (Pendiente, Confirmada o Cancelada).
+            grupo.tabla.appendChild(fila);
         });
 
-        // Muestra u oculta el mensaje de "no tienes citas":
-        // - Si hay al menos una cita (length > 0), se agrega la
-        //   clase "d-none" (Bootstrap) para OCULTAR el mensaje.
-        // - Si no hay ninguna cita, se quita esa clase y el
-        //   mensaje queda visible.
-        // classList.toggle(clase, condicion) agrega la clase cuando
-        // la condición es true, y la quita cuando es false.
-        vacio.classList.toggle("d-none", respuesta.citas.length > 0);
+        // Recorre cada uno de los tres grupos y muestra/oculta su
+        // mensaje de "vacío" según si esa categoría recibió alguna
+        // cita o no. classList.toggle(clase, condicion) agrega la
+        // clase "d-none" (oculta) cuando la condición es true, y la
+        // quita (muestra) cuando es false.
+        Object.entries(grupos).forEach(([estado, grupo]) => {
+            grupo.vacio.classList.toggle("d-none", conteo[estado] > 0);
+        });
 
     } catch (error) {
         // Si api() falló (sesión inválida, error de red, error del
-        // servidor), se captura aquí y se muestra el mensaje en la
-        // alerta del sistema en vez de romper la página.
+        // servidor), se muestra el mensaje en la alerta del sistema
+        // en vez de dejar la página rota o sin respuesta visual.
         mostrarAlerta(error.message, "danger");
     }
 }
@@ -291,19 +321,41 @@ document.addEventListener("click", async (evento) => {
     }
 });
 
+// Guarda temporalmente el id de la cita que se está intentando
+// cancelar, mientras el modal espera la confirmación del usuario.
+let citaPendienteDeCancelar = null;
+
 function cancelarCita(citaId) {
-    const confirmacion = confirm("¿Estás seguro de que quieres cancelar esta cita?");
-    if (!confirmacion) return;
+    citaPendienteDeCancelar = citaId;
 
-    try {
-        const respuesta = api(`/citas/${citaId}`, { method: "DELETE" });
-        mostrarAlerta(respuesta.mensaje, "success");
-        cargarMisCitas();
-
-    } catch (error) {
-        mostrarAlerta(error.message, "danger");
-    }
+    const modalElemento = document.getElementById("modalConfirmar");
+    const modal = bootstrap.Modal.getOrCreateInstance(modalElemento);
+    modal.show();
 }
+
+// Este listener se conecta UNA sola vez, no cada vez que se abre el
+// modal (por eso va fuera de cancelarCita, en el nivel principal
+// del archivo, junto a tus otros listeners globales).
+document.addEventListener("DOMContentLoaded", () => {
+    const btnConfirmar = document.getElementById("btn-confirmar-cancelacion");
+    if (!btnConfirmar) return;
+
+    btnConfirmar.addEventListener("click", async () => {
+        const citaId = citaPendienteDeCancelar;
+        if (!citaId) return;
+
+        const modalElemento = document.getElementById("modalConfirmar");
+        bootstrap.Modal.getInstance(modalElemento).hide();
+
+        try {
+            const respuesta = await api(`/citas/${citaId}`, { method: "DELETE" });
+            mostrarAlerta(respuesta.mensaje, "success");
+            cargarMisCitas();
+        } catch (error) {
+            mostrarAlerta(error.message, "danger");
+        }
+    });
+});
 
 function reprogramarCita(citaId) {
     window.location.href = `agendar.html?reprogramar=${citaId}`;
@@ -330,7 +382,33 @@ function colorPorEspecialidad(especialidad) {
     }
     return coloresEspecialidad[especialidad];
 }
+async function numerosDelKpi() {
+    const kpiProximas = document.getElementById("kpi-proximas");
+    const kpiPendientes = document.getElementById("kpi-pendientes");
+    const kpiCanceladas = document.getElementById("kpi-canceladas");
+    const kpiEspera = document.getElementById("kpi-espera");
 
+    if (!kpiProximas && !kpiPendientes && !kpiCanceladas && !kpiEspera) return;
+
+    try {
+        const [pendientes, confirmadas, canceladas] = await Promise.all([
+            api("/citas/Pendiente/count"),
+            api("/citas/Confirmada/count"),
+            api("/citas/Cancelada/count")
+        ]);
+
+        if (kpiProximas) kpiProximas.textContent = pendientes.total_citas + confirmadas.total_citas;
+        if (kpiPendientes) kpiPendientes.textContent = pendientes.total_citas;
+        if (kpiCanceladas) kpiCanceladas.textContent = canceladas.total_citas;
+
+        // Lista de espera: endpoint todavía no existe en el backend.
+        // Se deja un placeholder para no romper la tarjeta mientras tanto.
+        if (kpiEspera) kpiEspera.textContent = "—";
+
+    } catch (error) {
+        mostrarAlerta(error.message, "danger");
+    }
+}
 function pintarSesion() {
     // Lee el usuario guardado en el navegador (localStorage) desde el login.
     // Si no existe nada guardado, "usuario" queda en null en vez de dar error.
