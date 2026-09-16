@@ -1,0 +1,59 @@
+    <title>Reprogramar cita | CliniCita</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../../assets/css/estilos.css">
+</head><body class="app-shell">
+<div class="container-fluid">
+    <div class="row">
+        <aside class="col-lg-2 app-sidebar">
+            <a class="navbar-brand-text d-block mb-4 text-decoration-none" href="../../index.html"><i class="bi bi-heart-pulse-fill me-1"></i>Clini<span>Cita</span></a>
+            <p class="small text-white-50 mb-3">Paciente</p>
+            <nav class="nav flex-column">
+                <a class="nav-link" href="dashboard.html"><i class="bi bi-grid me-2"></i>Inicio</a>
+                <a class="nav-link" href="agendar.html"><i class="bi bi-calendar-plus me-2"></i>Agendar cita</a>
+                <a class="nav-link" href="mis-citas.html"><i class="bi bi-calendar3 me-2"></i>Mis citas</a>
+                <a class="nav-link active" href="reprogramar.html"><i class="bi bi-arrow-repeat me-2"></i>Reprogramar cita</a>
+                <a class="nav-link" href="perfil.html"><i class="bi bi-person me-2"></i>Perfil</a>
+                <a class="nav-link" href="../../pages/login.html"><i class="bi bi-box-arrow-left me-2"></i>Salir</a>
+            </nav>
+        </aside>
+        <main class="col-lg-10 app-content">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h1 class="h3 mb-0">Reprogramar cita</h1>
+                <a class="btn btn-outline-clinicita btn-sm" href="mis-citas.html">Volver a mis citas</a>
+            </div>
+            <div class="panel-card">
+                <div id="alerta-sistema" class="alert d-none" role="alert"></div>
+                <form data-form="reprogramar" method="post" action="#">
+                    <div class="mb-4">
+                        <label for="cita" class="form-label">Cita a reprogramar</label>
+                        <select class="form-select" id="cita" name="cita_id" required>
+                            <option value="">Selecciona la cita que quieres cambiar...</option>
+                            <!-- Las opciones las llena cargarCitasParaReprogramar() con GET /api/citas -->
+                        </select>
+                    </div>
+
+                    <h2 class="h6 mb-3">Cita actual</h2>
+                    <div class="row g-3 mb-4">
+                        <div class="col-6 col-md-4">
+                            <div class="small text-muted">Fecha</div>
+                            <div class="fw-semibold" id="resumen-fecha">--</div>
+                        </div>
+                        <div class="col-6 col-md-4">
+                            <div class="small text-muted">Hora</div>
+                            <div class="fw-semibold" id="resumen-hora">--</div>
+                        </div>
+                        <div class="col-6 col-md-4">
+                            <div class="small text-muted">Especialidad</div>
+                            <div class="fw-semibold" id="resumen-especialidad">--</div>
+                        </div>
+                        <div class="col-6 col-md-4">
+                            <div class="small text-muted">Médico</div>
+                            <div class="fw-semibold" id="resumen-medico">--</div>
+                        </div>
+                        <div class="col-6 col-md-4">
+                            <div class="small text-muted">Estado</div>
+                            <div class="fw-semibold" id="resumen-estado">--</div>
+                        </div>
+                    </div>
