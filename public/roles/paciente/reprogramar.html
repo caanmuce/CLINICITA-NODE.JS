@@ -1,9 +1,15 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Reprogramar cita | CliniCita</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="../../assets/css/estilos.css">
-</head><body class="app-shell">
+</head>
+<body class="app-shell">
 <div class="container-fluid">
     <div class="row">
         <aside class="col-lg-2 app-sidebar">
@@ -57,3 +63,81 @@
                             <div class="fw-semibold" id="resumen-estado">--</div>
                         </div>
                     </div>
+
+                    <h2 class="h6 mb-3">Nuevo horario</h2>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label for="especialidad" class="form-label">Especialidad</label>
+                            <select class="form-select" id="especialidad" name="especialidad_id" required>
+                                <option value="">Selecciona...</option>
+                                <!-- TODO: GET /api/especialidades -->
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="medico" class="form-label">Médico</label>
+                            <select class="form-select" id="medico" name="medico_id" required>
+                                <option value="">Selecciona una especialidad primero...</option>
+                                <!-- TODO: GET /api/medicos?especialidad= -->
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="fecha" class="form-label">Nueva fecha</label>
+                            <input class="form-control" type="date" id="fecha" name="fecha" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="hora" class="form-label">Nueva hora</label>
+                            <select class="form-select" id="hora" name="hora" required>
+                                <option value="">Selecciona médico y fecha primero...</option>
+                                <!-- TODO: GET /api/horarios?medico=&fecha= -->
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="sede" class="form-label">Sede</label>
+                            <select class="form-select" id="sede" name="sede_id">
+                                <option value="">Selecciona...</option>
+                                <!-- TODO: GET /api/sedes -->
+                            </select>
+                        </div>
+                    </div>
+
+                    <h2 class="h6 mt-4 mb-3">Detalle del cambio</h2>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label for="motivo_cambio" class="form-label">Motivo del cambio</label>
+                            <select class="form-select" id="motivo_cambio" name="motivo_cambio" required>
+                                <option value="">Selecciona...</option>
+                                <option value="Cambio de fecha">Cambio de fecha</option>
+                                <option value="Cambio de hora">Cambio de hora</option>
+                                <option value="Cambio de medico">Cambio de médico</option>
+                                <option value="Cambio de sede">Cambio de sede</option>
+                                <option value="Indicacion medica">Indicación médica</option>
+                                <option value="Otro">Otro</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="observaciones" class="form-label">Observaciones (opcional)</label>
+                            <textarea class="form-control" id="observaciones" name="observaciones" rows="3"></textarea>
+                        </div>
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="acepta_politica" name="acepta_politica" value="si" required>
+                                <label class="form-check-label" for="acepta_politica">
+                                    Confirmo que solicito el cambio con al menos 24 horas de anticipación. El cupo
+                                    anterior queda disponible para la lista de espera.
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2 mt-4">
+                        <button type="submit" class="btn btn-clinicita">Confirmar reprogramación</button>
+                        <a class="btn btn-outline-clinicita" href="mis-citas.html">Descartar cambios</a>
+                    </div>
+                </form>
+            </div>
+        </main>
+    </div>
+</div>
+<script src="../../assets/js/app.js"></script>
+</body>
+</html>

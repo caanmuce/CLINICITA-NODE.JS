@@ -93,6 +93,10 @@ document.addEventListener("submit", (evento) => {
                 })
                 .catch((error) => mostrarAlerta(error.message, "danger"));
             break;
+        case "reprogramar":
+            // TODO: api(`/citas/${datos.cita_id}`, { method: "PUT", body: JSON.stringify(datos) })
+            mostrarAlerta("Reprogramación lista para conectar con el backend.", "warning");
+            break;
         case "perfil":
             mostrarAlerta("Actualización de perfil lista para conectar con el backend.", "warning");
             break;
@@ -131,6 +135,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (document.querySelector('[data-form="agendar"]')) cargarFormularioCita();
+    if (document.querySelector('[data-form="reprogramar"]')) {
+        cargarFormularioCita();
+        cargarCitasParaReprogramar();
+    }
             if (document.getElementById("tabla-citas")) {
                 cargarMisCitas();
                 window.setInterval(cargarMisCitas, 15000);
@@ -325,4 +333,46 @@ async function cargarProximaCita() {
     } catch (error) {
         mostrarAlerta(error.message, "danger");
     }
+}
+
+/**
+ * Reprogramar cita (rol paciente).
+ * Llena el select "Cita a reprogramar" con las citas del paciente y muestra los
+ * datos de la cita elegida en el resumen de reprogramar.html.
+ */
+async function cargarCitasParaReprogramar() {
+    const selectCita = document.getElementById("cita");
+    if (!selectCita) return;
+
+    try {
+        const respuesta = await api("/citas");
+        respuesta.citas.forEach((cita) => {
+            const opcion = document.createElement("option");
+            opcion.value = cita.cita_id;
+            opcion.textContent = `${cita.fecha} · ${cita.hora} · ${cita.especialidad} (${cita.estado})`;
+            opcion.dataset.fecha = cita.fecha;
+            opcion.dataset.hora = cita.hora;
+            opcion.dataset.especialidad = cita.especialidad;
+            opcion.dataset.medico = cita.medico;
+            opcion.dataset.estado = cita.estado;
+            selectCita.appendChild(opcion);
+        });
+    } catch (error) {
+        mostrarAlerta(error.message, "danger");
+    }
+
+    selectCita.addEventListener("change", () => {
+        const opcion = selectCita.selectedOptions[0];
+        const resumen = {
+            "resumen-fecha": opcion?.dataset.fecha,
+            "resumen-hora": opcion?.dataset.hora,
+            "resumen-especialidad": opcion?.dataset.especialidad,
+            "resumen-medico": opcion?.dataset.medico,
+            "resumen-estado": opcion?.dataset.estado
+        };
+        Object.entries(resumen).forEach(([id, valor]) => {
+            const elemento = document.getElementById(id);
+            if (elemento) elemento.textContent = valor || "--";
+        });
+    });
 }
