@@ -17,6 +17,7 @@
  * GET    /api/usuarios
  * GET    /api/lista-espera
  * GET    /api/reportes/ausentismo
+ * nnnnnnnn
 */
 
 const API_BASE = "/api";
