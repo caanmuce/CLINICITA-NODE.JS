@@ -25,33 +25,114 @@ function verifyPassword(password, storedPassword) {
     return crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(storedHash, "hex"));
 }
 
+/**
+ * Genera el token de sesión de un usuario después de un login exitoso.
+ *
+ * Es una versión "casera" de un JWT (JSON Web Token): un string firmado
+ * que el cliente guarda y reenvía en cada petición para probar quién es,
+ * sin que el servidor tenga que guardar nada de esa sesión en su lado.
+ *
+ * @param {object} user - Fila del usuario tal como viene de la base de datos
+ *                         (debe tener usuario_id y rol).
+ * @returns {string} Token con formato "payload.firma".
+ */
 function createToken(user) {
+    // 1. Arma el "contenido" del token: qué usuario es, qué rol tiene,
+    //    y cuándo deja de ser válido (ahora + 8 horas en milisegundos).
+    //    Se convierte a JSON y luego a Base64url (variante de Base64 segura
+    //    para usar en URLs/headers, sin +, / ni =).
     const payload = Buffer.from(JSON.stringify({
         id: user.usuario_id,
         rol: user.rol,
         exp: Date.now() + 8 * 60 * 60 * 1000
     })).toString("base64url");
+
+    // 2. Firma ese payload con HMAC-SHA256 usando el secreto del servidor
+    //    (TOKEN_SECRET). Esto es lo que hace que el token no se pueda
+    //    falsificar: solo quien conoce TOKEN_SECRET puede generar una
+    //    firma que coincida con un payload dado.
     const signature = crypto.createHmac("sha256", TOKEN_SECRET).update(payload).digest("base64url");
+
+    // 3. El token final es "payload.firma" — el cliente puede LEER el
+    //    payload (no está encriptado, solo codificado), pero no puede
+    //    MODIFICARLO sin invalidar la firma.
     return `${payload}.${signature}`;
 }
 
+/**
+ * Extrae y valida el usuario a partir del token que viene en la petición.
+ *
+ * @param {object} req - Objeto request de Express.
+ * @returns {object|null} Los datos del usuario ({id, rol, exp}) si el token
+ *                         es válido y no ha expirado; null en cualquier otro caso.
+ */
 function readToken(req) {
+    // 1. Busca el header "Authorization". El formato esperado es:
+    //    "Authorization: Bearer <token>". Si no viene el header,
+    //    se usa un string vacío para no romper el código de abajo.
     const header = req.headers.authorization || "";
+
+    // 2. Si el header empieza con "Bearer ", extrae solo el token
+    //    (todo lo que sigue después de esas 7 letras). Si no tiene
+    //    ese prefijo, "token" queda vacío.
     const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+
+    // 3. El token tiene formato "payload.firma" — se separa en sus
+    //    dos partes usando el punto como delimitador.
     const [payload, signature] = token.split(".");
+
+    // 4. Si falta cualquiera de las dos partes (token vacío, mal formado,
+    //    o sin el punto), no hay nada que validar: se rechaza de una vez.
     if (!payload || !signature) return null;
 
+    // 5. Vuelve a calcular la firma esperada para ESE payload, usando
+    //    el mismo secreto y algoritmo que en createToken(). Si el token
+    //    es legítimo, esta firma debe coincidir exactamente con la que
+    //    vino en la petición.
     const expected = crypto.createHmac("sha256", TOKEN_SECRET).update(payload).digest("base64url");
+
+    // 6. Compara la firma recibida contra la esperada. Se usa
+    //    timingSafeEqual() en vez de "===" para evitar ataques de
+    //    "timing attack" (donde un atacante podría medir cuánto tarda
+    //    la comparación para ir adivinando la firma letra por letra).
+    //    Primero se comparan las longitudes por separado, porque
+    //    timingSafeEqual() lanza error si los strings no miden igual.
     if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
 
+    // 7. Si la firma es válida, decodifica el payload de vuelta a un
+    //    objeto JS normal ({id, rol, exp}).
     const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+
+    // 8. Última validación: revisa que el token no haya expirado ya
+    //    (comparando el campo "exp" guardado contra la hora actual).
+    //    Si expiró, se rechaza aunque la firma sea perfectamente válida.
     return data.exp > Date.now() ? data : null;
 }
 
+/**
+ * Middleware de Express que protege una ruta: solo deja pasar si el
+ * request trae un token válido y vigente.
+ *
+ * Uso: app.get("/api/algo", requireAuth, (req, res) => { ... })
+ */
 function requireAuth(req, res, next) {
+    // Intenta leer y validar el token de la petición actual.
     const user = readToken(req);
+
+    // Si no hay token, está mal formado, la firma no coincide, o ya
+    // expiró: readToken() devuelve null y se corta la petición aquí
+    // con un 401 (No autorizado), sin dejar que llegue a la ruta real.
     if (!user) return res.status(401).json({ mensaje: "Sesión no válida o expirada" });
+
+    // Si el token es válido, se "cuelgan" sus datos (id, rol) en el
+    // objeto req, para que cualquier ruta que use este middleware
+    // después pueda acceder a req.user.id / req.user.rol sin tener
+    // que volver a leer el token.
     req.user = user;
+
+    // next() le da el paso a la siguiente función en la cadena
+    // (el siguiente middleware, o la ruta final). Sin esta llamada,
+    // la petición se quedaría "colgada" sin respuesta.
     next();
 }
 
@@ -297,4 +378,71 @@ initializeAuth()
         console.error("No fue posible preparar la autenticación:", error);
         process.exit(1);
     });
-    //HOLA CAMILO
+
+app.delete("/api/citas/:id", requireAuth, requireRole("paciente"), async (req, res) => {
+    const users = await query("SELECT paciente_id FROM usuarios WHERE usuario_id = ? AND rol = 'paciente' AND activo = 1", [req.user.id]); 
+    const pacienteId = users[0]?.paciente_id;
+    if (!pacienteId) return res.status(400).json({ mensaje: "El usuario no está asociado a un paciente" });
+    // Verifica que la cita sea del paciente que hace la petición,
+    // para que nadie pueda cancelar citas ajenas cambiando el id en la URL.
+    const citaId = await query("SELECT cita_id FROM citas WHERE cita_id = ? AND paciente_id = ?", [req.params.id, pacienteId]);
+    if (!citaId.length) return res.status(404).json({ mensaje: "Cita no encontrada o no pertenece al paciente" });
+
+    await query("UPDATE citas SET estado = 'Cancelada' WHERE cita_id = ?", [req.params.id]);
+    res.json({ mensaje: "Cita cancelada correctamente" });
+})
+
+/**
+ * Cuenta las citas del paciente autenticado que tengan un estado
+ * específico, indicado como parte de la URL (ej. /api/citas/Pendiente/count).
+ *
+ * Reemplaza a las rutas separadas /api/citas/pendientes/count y
+ * /api/citas/canceladas/count con una sola ruta reutilizable para
+ * cualquier estado válido de una cita.
+ *
+ */
+app.get("/api/citas/:estado/count", requireAuth, requireRole("paciente"), async (req, res) => {
+    // Lista blanca de los únicos valores permitidos para "estado".
+    // Debe coincidir exactamente con el ENUM definido en la columna
+    // citas.estado de la base de datos.
+    const estadosValidos = ["Pendiente", "Confirmada", "Cancelada", "Completada", "No-Asistio"];
+
+    // req.params.estado toma el valor de la URL en la posición ":estado".
+    // Por ejemplo, en GET /api/citas/Pendiente/count, esto sería "Pendiente".
+    const estado = req.params.estado;
+
+    // Verifica que lo que llegó en la URL sea uno de los estados
+    // permitidos. Esto es una medida de seguridad y de integridad:
+    // sin esta validación, alguien podría mandar cualquier texto en
+    // la URL (ej. /api/citas/loquesea/count) y aunque no rompería
+    // nada grave aquí (la consulta simplemente no encontraría
+    // coincidencias), sí sería una entrada no controlada llegando
+    // directo a una consulta SQL.
+    if (!estadosValidos.includes(estado)) return res.status(400).json({ mensaje: "Estado no válido" });
+
+    // Traduce el usuario_id del token (req.user.id) al paciente_id
+    // real, ya que la tabla "citas" se relaciona por paciente_id.
+    const users = await query("SELECT paciente_id FROM usuarios WHERE usuario_id = ? AND rol = 'paciente' AND activo = 1", [req.user.id]);
+
+    // Toma el paciente_id de la primera fila encontrada. El "?."
+    // evita un error si "users" viniera vacío (usuario sin paciente
+    // asociado, o desactivado) — en ese caso queda undefined en vez
+    // de lanzar una excepción.
+    const pacienteId = users[0]?.paciente_id;
+
+    // Si no hay paciente asociado, corta la petición con un error
+    // controlado (400) antes de intentar consultar citas con un
+    // pacienteId inexistente.
+    if (!pacienteId) return res.status(400).json({ mensaje: "El usuario no está asociado a un paciente" });
+
+    // Cuenta cuántas citas de ESTE paciente tienen exactamente el
+    // estado pedido. Como "estado" ya fue validado contra la lista
+    // blanca de arriba, es seguro pasarlo como parámetro preparado
+    // (el "?" en la consulta) sin riesgo de inyección SQL.
+    const result = await query("SELECT COUNT(*) AS total_citas FROM citas WHERE paciente_id = ? AND estado = ?", [pacienteId, estado]);
+
+    // El resultado de una consulta SQL siempre es un arreglo, aunque
+    // sea un solo valor — por eso result[0].total_citas, en vez de
+    // result.total_citas directamente.
+    res.json({ total_citas: result[0].total_citas });
+});

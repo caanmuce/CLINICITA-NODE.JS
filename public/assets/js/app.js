@@ -27,6 +27,14 @@ async function api(ruta, opciones = {}) {
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...opciones.headers },
         ...opciones
     });
+
+    if (respuesta.status === 401) {
+        localStorage.removeItem("clinicita_token");
+        localStorage.removeItem("clinicita_usuario");
+        window.location.href = "/pages/login.html";
+        return;
+    }
+
     const datos = await respuesta.json();
     if (!respuesta.ok) throw new Error(datos.mensaje || "Error de red o servidor");
     return datos;
@@ -116,6 +124,7 @@ document.addEventListener("submit", (evento) => {
 document.addEventListener("DOMContentLoaded", () => {
     pintarSesion();
     cargarCitasHero();
+    configurarLogout();
 
     const usuario = JSON.parse(localStorage.getItem("clinicita_usuario") || "null");
     const ruta = window.location.pathname;
@@ -131,7 +140,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (document.querySelector('[data-form="agendar"]')) cargarFormularioCita();
-            if (document.getElementById("tabla-citas")) {
+            if (document.getElementById("tabla-pendientes")) {
                 cargarMisCitas();
                 window.setInterval(cargarMisCitas, 15000);
             }
@@ -140,6 +149,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 cargarProximaCita();
                 window.setInterval(cargarProximaCita, 15000);
             }
+
+            if (document.getElementById("kpi-proximas")) {
+                numerosDelKpi();
+                window.setInterval(numerosDelKpi, 15000);
+            }  
 });
 
 async function cargarFormularioCita() {
@@ -184,29 +198,170 @@ async function cargarHorarios() {
     hora.disabled = !medico.value || !fecha.value;
 }
 
+/**
+ * Carga las citas del paciente autenticado y las distribuye en TRES
+ * tablas separadas según su estado (Pendiente, Confirmada, Cancelada),
+ * cada una con su propio mensaje de "vacío" independiente.
+ *
+ * Requiere que la página tenga, para cada uno de los tres estados:
+ *   - un <tbody> con id "tabla-pendientes" / "tabla-confirmadas" / "tabla-canceladas"
+ *   - un elemento con id "empty-pendientes" / "empty-confirmadas" / "empty-canceladas"
+ */
 async function cargarMisCitas() {
-    const tabla = document.getElementById("tabla-citas");
-    const vacio = document.getElementById("empty-citas");
+    // Mapa de configuración: por cada estado posible de una cita, define
+    // a qué tabla va, qué elemento mostrar si esa tabla queda vacía, y si
+    // esa categoría debe mostrar los botones de Cancelar/Reprogramar.
+    // (Las citas canceladas no necesitan esos botones, por eso acciones: false).
+    const grupos = {
+        Pendiente: { tabla: document.getElementById("tabla-pendientes"), vacio: document.getElementById("empty-pendientes"), acciones: true },
+        Confirmada: { tabla: document.getElementById("tabla-confirmadas"), vacio: document.getElementById("empty-confirmadas"), acciones: true },
+        Cancelada: { tabla: document.getElementById("tabla-canceladas"), vacio: document.getElementById("empty-canceladas"), acciones: false }
+    };
+
+    // Guarda de seguridad: si esta página no tiene ni siquiera la primera
+    // tabla (tabla-pendientes), asumimos que ninguna de las tres existe
+    // aquí, y no tiene sentido seguir ejecutando el resto de la función.
+    if (!grupos.Pendiente.tabla) return;
+
     try {
+        // Le pregunta al servidor por las citas del usuario logueado.
+        // api() ya agrega el token de sesión automáticamente.
         const respuesta = await api("/citas");
-        tabla.innerHTML = "";
-        respuesta.citas.forEach((cita) => {
+
+        // Ordena todas las citas de la más próxima a la más lejana en
+        // el tiempo, combinando fecha+hora en un objeto Date para
+        // poder compararlas correctamente.
+        const citasOrdenadas = [...respuesta.citas].sort(
+            (a, b) => new Date(`${a.fecha}T${a.hora}`) - new Date(`${b.fecha}T${b.hora}`)
+        );
+
+        // Vacía las tres tablas antes de rellenarlas. Necesario porque
+        // esta función se llama repetidamente (setInterval) — sin esto,
+        // cada actualización iría acumulando filas duplicadas.
+        Object.values(grupos).forEach((grupo) => { grupo.tabla.innerHTML = ""; });
+
+        // Lleva la cuenta de cuántas citas terminaron en cada categoría.
+        // Se usa al final para decidir qué mensajes de "vacío" mostrar.
+        const conteo = { Pendiente: 0, Confirmada: 0, Cancelada: 0 };
+
+        // Recorre cada cita YA ordenada y la enruta a su tabla correcta
+        // según el valor de cita.estado.
+        citasOrdenadas.forEach((cita) => {
+            // Busca en "grupos" la configuración correspondiente al
+            // estado de esta cita en particular.
+            const grupo = grupos[cita.estado];
+
+            // Si el estado de la cita no tiene una tabla asociada aquí
+            // (por ejemplo "Completada" o "No-Asistio", que existen en
+            // la base de datos pero no tienen sección en esta página),
+            // simplemente se ignora esa cita y se sigue con la siguiente.
+            if (!grupo) return;
+
+            // Suma uno al contador de esa categoría específica.
+            conteo[cita.estado]++;
+
+            // Crea la fila <tr> con los datos básicos de la cita.
             const fila = document.createElement("tr");
-            [cita.fecha, cita.hora, cita.especialidad, cita.medico, cita.estado].forEach((valor) => {
+            [cita.fecha, cita.hora, cita.especialidad, cita.medico].forEach((valor) => {
                 const celda = document.createElement("td");
                 celda.textContent = valor;
                 fila.appendChild(celda);
             });
-            const acciones = document.createElement("td");
-            acciones.textContent = "-";
-            fila.appendChild(acciones);
-            tabla.appendChild(fila);
+
+            // Solo agrega la columna de botones si esta categoría los
+            // necesita (grupo.acciones === true). Las citas canceladas
+            // no entran aquí porque su grupo tiene acciones: false.
+            if (grupo.acciones) {
+                const acciones = document.createElement("td");
+                acciones.innerHTML = `
+                    <button class="btn btn-outline-danger btn-sm me-1" data-accion="cancelar" data-cita-id="${cita.cita_id}">
+                        <i class="bi bi-x-circle"></i>
+                    </button>
+                    <button class="btn btn-outline-clinicita btn-sm" data-accion="reprogramar" data-cita-id="${cita.cita_id}">
+                        <i class="bi bi-arrow-repeat"></i>
+                    </button>
+                `;
+                fila.appendChild(acciones);
+            }
+
+            // Inserta la fila ya armada en la tabla que le corresponde
+            // según su estado (Pendiente, Confirmada o Cancelada).
+            grupo.tabla.appendChild(fila);
         });
-        vacio.classList.toggle("d-none", respuesta.citas.length > 0);
+
+        // Recorre cada uno de los tres grupos y muestra/oculta su
+        // mensaje de "vacío" según si esa categoría recibió alguna
+        // cita o no. classList.toggle(clase, condicion) agrega la
+        // clase "d-none" (oculta) cuando la condición es true, y la
+        // quita (muestra) cuando es false.
+        Object.entries(grupos).forEach(([estado, grupo]) => {
+            grupo.vacio.classList.toggle("d-none", conteo[estado] > 0);
+        });
+
     } catch (error) {
+        // Si api() falló (sesión inválida, error de red, error del
+        // servidor), se muestra el mensaje en la alerta del sistema
+        // en vez de dejar la página rota o sin respuesta visual.
         mostrarAlerta(error.message, "danger");
     }
 }
+
+document.addEventListener("click", async (evento) => {
+    const boton = evento.target.closest("button[data-accion]");
+    if (!boton) return;
+    
+    const citaId = boton.dataset.citaId;
+    const accion = boton.dataset.accion;
+
+    if (accion === "cancelar"){
+        cancelarCita(citaId);
+    }
+    if (accion === "reprogramar"){
+        reprogramarCita(citaId);
+    }
+});
+
+// Guarda temporalmente el id de la cita que se está intentando
+// cancelar, mientras el modal espera la confirmación del usuario.
+let citaPendienteDeCancelar = null;
+
+function cancelarCita(citaId) {
+    citaPendienteDeCancelar = citaId;
+
+    const modalElemento = document.getElementById("modalConfirmar");
+    const modal = bootstrap.Modal.getOrCreateInstance(modalElemento);
+    modal.show();
+}
+
+// Este listener se conecta UNA sola vez, no cada vez que se abre el
+// modal (por eso va fuera de cancelarCita, en el nivel principal
+// del archivo, junto a tus otros listeners globales).
+document.addEventListener("DOMContentLoaded", () => {
+    const btnConfirmar = document.getElementById("btn-confirmar-cancelacion");
+    if (!btnConfirmar) return;
+
+    btnConfirmar.addEventListener("click", async () => {
+        const citaId = citaPendienteDeCancelar;
+        if (!citaId) return;
+
+        const modalElemento = document.getElementById("modalConfirmar");
+        bootstrap.Modal.getInstance(modalElemento).hide();
+
+        try {
+            const respuesta = await api(`/citas/${citaId}`, { method: "DELETE" });
+            mostrarAlerta(respuesta.mensaje, "success");
+            cargarMisCitas();
+        } catch (error) {
+            mostrarAlerta(error.message, "danger");
+        }
+    });
+});
+
+function reprogramarCita(citaId) {
+    window.location.href = `agendar.html?reprogramar=${citaId}`;
+    //TODO: Crear el formulario de reprogramación de cita con html y que cargue la cita existente y permita cambiar fecha/hora.
+}      
+
 
 const coloresEspecialidad = {}; // caché para que la misma especialidad siempre tenga el mismo color
 const paletaColores = [
@@ -227,14 +382,55 @@ function colorPorEspecialidad(especialidad) {
     }
     return coloresEspecialidad[especialidad];
 }
+async function numerosDelKpi() {
+    const kpiProximas = document.getElementById("kpi-proximas");
+    const kpiPendientes = document.getElementById("kpi-pendientes");
+    const kpiCanceladas = document.getElementById("kpi-canceladas");
+    const kpiEspera = document.getElementById("kpi-espera");
 
+    if (!kpiProximas && !kpiPendientes && !kpiCanceladas && !kpiEspera) return;
+
+    try {
+        const [pendientes, confirmadas, canceladas] = await Promise.all([
+            api("/citas/Pendiente/count"),
+            api("/citas/Confirmada/count"),
+            api("/citas/Cancelada/count")
+        ]);
+
+        if (kpiProximas) kpiProximas.textContent = pendientes.total_citas + confirmadas.total_citas;
+        if (kpiPendientes) kpiPendientes.textContent = pendientes.total_citas;
+        if (kpiCanceladas) kpiCanceladas.textContent = canceladas.total_citas;
+
+        // Lista de espera: endpoint todavía no existe en el backend.
+        // Se deja un placeholder para no romper la tarjeta mientras tanto.
+        if (kpiEspera) kpiEspera.textContent = "—";
+
+    } catch (error) {
+        mostrarAlerta(error.message, "danger");
+    }
+}
 function pintarSesion() {
+    // Lee el usuario guardado en el navegador (localStorage) desde el login.
+    // Si no existe nada guardado, "usuario" queda en null en vez de dar error.
     const usuario = JSON.parse(localStorage.getItem("clinicita_usuario") || "null");
+    if (usuario == null) {
+        console.log("No hay usuario logueado.");
+    }
+
+    // Busca el contenedor del navbar donde van los botones de sesión (login/registro
+    // o el saludo, según corresponda).
     const zona = document.getElementById("zona-sesion");
+
+    // Si esta página no tiene ese contenedor (por ejemplo, una página sin navbar),
+    // no hay nada que pintar: se sale de la función sin hacer nada.
     if (!zona) return;
 
+    // Si no hay usuario logueado, no se toca el HTML: se quedan los botones
+    // de "Iniciar sesión" / "Registrarse" que ya vienen puestos por defecto.
     if (!usuario) return;
 
+    // Mapa de a dónde debe ir cada rol al hacer clic en "Mi panel".
+    // Las rutas son relativas a la página donde vive el navbar (index.html).
     const destinos = {
         paciente: "roles/paciente/dashboard.html",
         medico: "roles/medico/agenda.html",
@@ -242,16 +438,45 @@ function pintarSesion() {
         administrador: "roles/admin/dashboard.html"
     };
 
+    // Reemplaza el contenido del navbar: quita los botones de login/registro
+    // y en su lugar pone el saludo con el nombre, un acceso directo al panel
+    // del rol correspondiente, y el botón de cerrar sesión.
     zona.innerHTML = `
         <span class="text-white small me-2">Bienvenido, ${usuario.nombre}</span>
         <a class="btn btn-clinicita btn-sm" href="${destinos[usuario.rol] || '#'}">Mi panel</a>
         <button class="btn btn-outline-clinicita btn-sm" id="btn-logout">Cerrar sesión</button>
     `;
+    // El "|| '#'" es un respaldo: si el rol guardado no coincide con ninguna
+    // clave del mapa "destinos" (dato corrupto o rol nuevo no contemplado),
+    // el link no rompe la página, solo no lleva a ningún lado (href="#").
 
+    // Como el botón de logout se acaba de crear con innerHTML (no existía antes
+    // en el HTML), hay que buscarlo DESPUÉS de crearlo y conectarle el evento
+    // de clic manualmente — innerHTML no trae los listeners de vuelta.
     document.getElementById("btn-logout").addEventListener("click", () => {
+        // Borra el "carnet" (token) — sin él, la función api() ya no puede
+        // autenticar ninguna petición futura al servidor.
+        localStorage.removeItem("clinicita_token");
+
+        // Borra los datos del usuario (nombre, rol) que se usan para pintar
+        // el saludo y decidir a qué panel redirigir.
+        localStorage.removeItem("clinicita_usuario");
+
+        // Recarga la página actual. Al recargar, pintarSesion() se ejecuta
+        // de nuevo, pero esta vez "usuario" será null, así que el "if (!usuario)
+        // return;" de arriba deja los botones de login/registro por defecto.
+        window.location.reload();
+    });
+}
+
+
+function configurarLogout(idBoton = "btn-logout") {
+    const boton = document.getElementById(idBoton);
+    if (!boton) return;
+    boton.addEventListener("click", () => {
         localStorage.removeItem("clinicita_token");
         localStorage.removeItem("clinicita_usuario");
-        window.location.reload();
+        window.location.href = "../../pages/login.html";
     });
 }
 
