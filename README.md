@@ -228,4 +228,4 @@ CliniCita fue creado como proyecto del **Servicio Nacional de Aprendizaje (SENA)
 
 ## Licencia
 
-Este proyecto es de carácter académico. Agrega aquí la licencia que el equipo decida utilizar antes de distribuirlo públicamente.
+Este proyecto es de carácter académico. 
