@@ -7,6 +7,41 @@
     --clinicita-accent: #F59E0B;
     --clinicita-soft: #F4FFFE;
 }
+        body {
+            background: radial-gradient(circle at top, #0f2027 0%, #0d1b1e 60%, #08100f 100%);
+            font-family: 'DM Sans', sans-serif;
+            min-height: 100vh;
+        }
+        .error-card {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 1.25rem;
+            padding: 3rem 2.5rem;
+            max-width: 460px;
+            backdrop-filter: blur(6px);
+        }
+        .error-gif {
+            width: 160px;
+            height: 160px;
+            object-fit: cover;
+            border-radius: 50%;
+            border: 3px solid #0D9488;
+            box-shadow: 0 0 0 6px rgba(13, 148, 136, 0.15);
+        }
+        .error-code {
+            font-family: 'Playfair Display', serif;
+            font-weight: 900;
+            font-size: 4rem;
+            color: #5EEAD4;
+            line-height: 1;
+        }
+        .error-title {
+            color: #fff;
+            font-weight: 600;
+        }
+        .error-text {
+            color: rgba(255, 255, 255, 0.6);
+        }
 
 body {
     font-family: 'DM Sans', sans-serif;
