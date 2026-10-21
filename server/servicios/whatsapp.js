@@ -128,7 +128,7 @@ function clasificarLocal(consulta) {
     const texto = consulta.toLowerCase();
     if (/\b(cancelar|cancelo|cancela|anular)\b/.test(texto)) return { intencion: "CANCELAR", sintomas_detalles: "" };
     if (/\b(confirmar|confirmo|asistiré|asistire|asistencia)\b/.test(texto)) return { intencion: "CONFIRMAR", sintomas_detalles: "" };
-    if (/\b(dolor|fiebre|tos|síntoma|sintoma|mareo|náusea|nausea|malestar)\b/.test(texto)) {
+    if (/\b(dolor|duele|fiebre|tos|síntoma|sintoma|mareo|náusea|nausea|malestar|ardor|vomit|diarrea|sangrado|presión|presion)\b/.test(texto)) {
         return { intencion: "SINTOMAS", sintomas_detalles: consulta };
     }
     return { intencion: "OTRO", sintomas_detalles: "" };
@@ -287,12 +287,16 @@ function seleccionarCita(citas, consulta) {
 
 function formatoOpcionesCitas(citas) {
     return citas.map((cita, indice) => {
-        const fecha = fechaCita(cita);
-        const fechaTexto = fecha
-            ? fecha.toLocaleString("es-CO", { timeZone: CLINIC_TIMEZONE, dateStyle: "medium", timeStyle: "short" })
-            : `${cita.fecha_cita} ${cita.hora_cita}`;
-        return `${indice + 1}. ${fechaTexto} (${cita.especialidad})`;
+        return `${indice + 1}. ${formatoCita(cita)}`;
     }).join("\n");
+}
+
+function formatoCita(cita) {
+    const fecha = fechaCita(cita);
+    const fechaTexto = fecha
+        ? fecha.toLocaleString("es-CO", { timeZone: CLINIC_TIMEZONE, dateStyle: "medium", timeStyle: "short" })
+        : `${cita.fecha_cita} ${cita.hora_cita}`;
+    return `${fechaTexto} (${cita.especialidad})`;
 }
 
 async function asegurarRecordatorio(query, citaId) {
@@ -334,6 +338,9 @@ async function procesarMensaje({ client, msg, consulta, query, clasificar, respo
     const lid = String(msg.from).endsWith("@lid") ? msg.from : null;
     const chatKey = lid || msg.from;
     const telefono = await obtenerTelefonoEntrante(client, msg);
+    const contextoInicial = obtenerConversacion(chatKey);
+    if (contextoInicial?.estado === "silencioso") return;
+
     if (lid && /^vincular\b/i.test(consulta)) {
         const vinculacion = await vincularLid(query, lid, consulta, telefono);
         if (vinculacion && vinculacion !== "invalido") {
@@ -341,9 +348,7 @@ async function procesarMensaje({ client, msg, consulta, query, clasificar, respo
         }
         return;
     }
-
     debugLog(`Mensaje WhatsApp recibido: from=${msg.from}, telefono=${telefono || "no disponible"}`);
-    const contextoInicial = obtenerConversacion(chatKey);
     const citasActivas = await obtenerCitasActivas(query, { telefono, lid });
     let cita = contextoInicial?.citaId
         ? citasActivas.find((citaActiva) => citaActiva.cita_id === contextoInicial.citaId)
@@ -370,7 +375,7 @@ async function procesarMensaje({ client, msg, consulta, query, clasificar, respo
     if (!cita) cita = citasActivas[0] || null;
     if (cita && !contextoInicial?.citaId && contextoInicial?.seleccionandoCita && /^\s*(?:cita\s*)?\d+\s*$/i.test(consulta)) {
         guardarConversacion(chatKey, { ...contextoInicial, citaId: cita.cita_id, pacienteId: cita.paciente_id, seleccionandoCita: false });
-        await msg.reply(`Seleccionaste la cita del ${formatoOpcionesCitas([cita])}. Ahora responde CONFIRMAR o CANCELAR.`);
+        await msg.reply(`Seleccionaste la cita del ${formatoCita(cita)}. Ahora responde CONFIRMAR o CANCELAR.`);
         return;
     }
     if (cita && lid && cita.whatsapp_lid !== lid) {
@@ -381,7 +386,6 @@ async function procesarMensaje({ client, msg, consulta, query, clasificar, respo
     }
 
     const contexto = obtenerConversacion(chatKey) || {};
-    if (contexto.estado === "silencioso") return;
 
     if (contexto.esperandoConfirmacionSintomas) {
         if (esRespuestaNegativa(consulta)) {
@@ -396,7 +400,16 @@ async function procesarMensaje({ client, msg, consulta, query, clasificar, respo
     }
 
     guardarConversacion(chatKey, { ...contexto, citaId: cita.cita_id, pacienteId: cita.paciente_id, seleccionandoCita: false });
-    const clasificacion = clasificar ? await clasificar(consulta).catch(() => clasificarLocal(consulta)) : clasificarLocal(consulta);
+    let clasificacion;
+    if (contexto.esperandoPreconsulta) {
+        if (/\b(confirmar|cancelar)\b/i.test(consulta)) {
+            await msg.reply("Por favor, describe brevemente tus síntomas o motivo de consulta para registrar tu preconsulta.");
+            return;
+        }
+        clasificacion = { intencion: "SINTOMAS", sintomas_detalles: consulta };
+    } else {
+        clasificacion = clasificar ? await clasificar(consulta).catch(() => clasificarLocal(consulta)) : clasificarLocal(consulta);
+    }
     if (!clasificar) debugLog(`[Gemini] Se usará clasificación local para: "${consulta}"`);
     const intencion = clasificacion.intencion;
 
@@ -453,6 +466,7 @@ async function procesarMensaje({ client, msg, consulta, query, clasificar, respo
         guardarConversacion(chatKey, {
             citaId: cita.cita_id,
             pacienteId: cita.paciente_id,
+            estado: "activo",
             esperandoConfirmacionSintomas: true
         });
         debugLog(`[WhatsApp] Preconsulta guardada para cita ${cita.cita_id}`);
