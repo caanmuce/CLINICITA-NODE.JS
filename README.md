@@ -119,6 +119,10 @@ El proyecto combina un frontend web responsive con un servidor **Node.js + Expre
    ENABLE_WHATSAPP=false
    ENABLE_WHATSAPP_CHATBOT=false
    WHATSAPP_COUNTRY_CODE=57
+   WHATSAPP_CONVERSATION_TTL_MS=14400000
+   CLINIC_TIMEZONE=America/Bogota
+   CLINIC_UTC_OFFSET=-05:00
+   DEBUG=false
    GEMINI_API_KEY=
    GEMINI_MODEL=gemini-2.5-flash-lite
    ```
@@ -150,6 +154,12 @@ ENABLE_WHATSAPP_CHATBOT=true
 ```
 
 La clave `GEMINI_API_KEY` es opcional. Si no está configurada, el sistema utiliza un clasificador local para reconocer confirmaciones, cancelaciones y mensajes de síntomas.
+
+Las conversaciones del chatbot se conservan en memoria durante el tiempo definido por
+`WHATSAPP_CONVERSATION_TTL_MS` (cuatro horas por defecto) y se limpian periódicamente.
+Para habilitar logs detallados de clasificación y procesamiento, usa `DEBUG=true`.
+Las fechas se interpretan con `CLINIC_UTC_OFFSET` y se muestran con `CLINIC_TIMEZONE`;
+los valores anteriores corresponden a Colombia.
 
 ## Credenciales de demostración
 
