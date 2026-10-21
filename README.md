@@ -60,7 +60,8 @@ El proyecto combina un frontend web responsive con un servidor **Node.js + Expre
 
 - Recordatorios de citas por WhatsApp mediante `whatsapp-web.js`.
 - Ejecución periódica de recordatorios con `node-cron`.
-- Vinculación de un número de WhatsApp con un paciente mediante documento y últimos cuatro dígitos del teléfono.
+- Vinculación de un WhatsApp ya identificado con el número registrado del paciente mediante documento y últimos cuatro dígitos del teléfono.
+- El chatbot solo responde al número registrado del paciente que tiene la cita; los mensajes de números no asociados se ignoran.
 - Clasificación local de mensajes y clasificación/respuesta opcional con Google Gemini.
 - Ficha de preconsulta con síntomas o motivo reportado por el paciente.
 
