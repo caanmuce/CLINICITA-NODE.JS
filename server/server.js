@@ -103,6 +103,18 @@ async function initializeAuth() {
             CONSTRAINT fichas_preconsulta_paciente_fk FOREIGN KEY (paciente_id) REFERENCES pacientes(paciente_id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
+    await query(`
+        CREATE TABLE IF NOT EXISTS recordatorios (
+            recordatorio_id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            cita_id INT NOT NULL,
+            canal_envio ENUM('WhatsApp', 'SMS', 'Email') DEFAULT 'WhatsApp',
+            fecha_envio DATETIME NULL,
+            estado_entrega ENUM('Pendiente', 'Enviado', 'Entregado', 'Fallido') DEFAULT 'Pendiente',
+            respuesta_paciente TINYINT(1) DEFAULT NULL,
+            KEY recordatorios_cita_idx (cita_id),
+            CONSTRAINT recordatorios_cita_fk FOREIGN KEY (cita_id) REFERENCES citas(cita_id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
 
     const demoUsers = [
         ["Paciente Demo", "paciente@clinicita.com", "paciente123", "paciente"],
@@ -238,8 +250,14 @@ app.get("/api/horarios", requireAuth, requireRole("paciente"), async (req, res) 
 app.post("/api/citas", requireAuth, requireRole("paciente"), async (req, res) => {
     const { medico_id, fecha, hora, motivo } = req.body;
     if (!medico_id || !fecha || !hora) return res.status(400).json({ mensaje: "Médico, fecha y hora son obligatorios" });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fecha)) || !/^\d{2}:\d{2}$/.test(String(hora))) {
+        return res.status(400).json({ mensaje: "La fecha u hora no tienen un formato válido" });
+    }
+    if (motivo !== undefined && (typeof motivo !== "string" || motivo.trim().length > 255)) {
+        return res.status(400).json({ mensaje: "El motivo no es válido" });
+    }
 
-    const fechaCita = new Date(`${fecha}T${hora}:00`);
+    const fechaCita = new Date(`${fecha}T${hora}:00${process.env.CLINIC_UTC_OFFSET || "-05:00"}`);
     if (Number.isNaN(fechaCita.getTime()) || fechaCita <= new Date()) return res.status(400).json({ mensaje: "La fecha y hora deben ser futuras" });
 
     try {
@@ -260,6 +278,11 @@ app.post("/api/citas", requireAuth, requireRole("paciente"), async (req, res) =>
             "INSERT INTO citas (paciente_id, medico_id, fecha_cita, hora_cita, motivo) VALUES (?, ?, ?, ?, ?)",
             [pacienteId, medico_id, fecha, hora, motivo?.trim() || null]
         );
+        await query(`
+            INSERT INTO recordatorios (cita_id, canal_envio, estado_entrega)
+            SELECT ?, 'WhatsApp', 'Pendiente'
+            WHERE NOT EXISTS (SELECT 1 FROM recordatorios WHERE cita_id = ?)
+        `, [cita.insertId, cita.insertId]);
         res.status(201).json({ mensaje: "Cita solicitada correctamente", cita_id: cita.insertId });
     } catch (error) {
         console.error("Error al agendar cita:", error.message);
