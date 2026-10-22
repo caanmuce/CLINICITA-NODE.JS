@@ -1,5 +1,41 @@
 const cron = require("node-cron");
 const conversaciones = new Map();
+const CONVERSACION_TTL_MS = Number(process.env.WHATSAPP_CONVERSATION_TTL_MS) || 4 * 60 * 60 * 1000;
+const CLINIC_TIMEZONE = process.env.CLINIC_TIMEZONE || "America/Bogota";
+const CLINIC_UTC_OFFSET = process.env.CLINIC_UTC_OFFSET || "-05:00";
+const DEBUG = process.env.DEBUG === "true";
+let limpiezaProgramada = false;
+
+function debugLog(mensaje) {
+    if (DEBUG) console.log(mensaje);
+}
+
+function guardarConversacion(chatKey, contexto) {
+    conversaciones.set(chatKey, { ...contexto, ultimaActividad: Date.now() });
+}
+
+function obtenerConversacion(chatKey) {
+    const contexto = conversaciones.get(chatKey);
+    if (!contexto) return null;
+    if (Date.now() - contexto.ultimaActividad > CONVERSACION_TTL_MS) {
+        conversaciones.delete(chatKey);
+        return null;
+    }
+    contexto.ultimaActividad = Date.now();
+    return contexto;
+}
+
+function programarLimpiezaConversaciones() {
+    if (limpiezaProgramada) return;
+    limpiezaProgramada = true;
+    const intervalo = setInterval(() => {
+        const limite = Date.now() - CONVERSACION_TTL_MS;
+        for (const [chatKey, contexto] of conversaciones) {
+            if (contexto.ultimaActividad < limite) conversaciones.delete(chatKey);
+        }
+    }, Math.min(CONVERSACION_TTL_MS, 15 * 60 * 1000));
+    intervalo.unref();
+}
 
 function limpiarTelefono(telefono) {
     let numero = String(telefono || "").replace(/[^0-9]/g, "");
@@ -9,11 +45,26 @@ function limpiarTelefono(telefono) {
     return numero;
 }
 
-async function enviarWhatsApp(client, telefono, mensaje) {
+async function enviarWhatsApp(client, query, { pacienteId, citaId, telefono, mensaje }) {
     const numero = limpiarTelefono(telefono);
-    if (!numero) return false;
+    if (!numero || !pacienteId || !citaId) return false;
 
     try {
+        const autorizados = await query(`
+            SELECT p.telefono_whatsapp
+            FROM pacientes p
+            JOIN citas c ON c.paciente_id = p.paciente_id
+            WHERE p.paciente_id = ?
+              AND c.cita_id = ?
+              AND c.estado IN ('Pendiente', 'Confirmada')
+        `, [pacienteId, citaId]);
+        const autorizado = autorizados[0]
+            && limpiarTelefono(autorizados[0].telefono_whatsapp) === numero;
+        if (!autorizado) {
+            console.warn(`Mensaje omitido: el número no pertenece al paciente autorizado para la cita ${citaId}`);
+            return false;
+        }
+
         const contacto = await client.getNumberId(numero);
         if (!contacto) {
             console.warn(`WhatsApp no tiene un usuario registrado para el número ${numero}`);
@@ -69,7 +120,7 @@ function fechaCita(cita) {
     const hora = cita.hora_cita instanceof Date
         ? cita.hora_cita.toISOString().slice(11, 19)
         : String(cita.hora_cita).slice(0, 8);
-    const resultado = new Date(`${fecha}T${hora}`);
+    const resultado = new Date(`${fecha}T${hora}${CLINIC_UTC_OFFSET}`);
     return Number.isNaN(resultado.getTime()) ? null : resultado;
 }
 
@@ -77,7 +128,7 @@ function clasificarLocal(consulta) {
     const texto = consulta.toLowerCase();
     if (/\b(cancelar|cancelo|cancela|anular)\b/.test(texto)) return { intencion: "CANCELAR", sintomas_detalles: "" };
     if (/\b(confirmar|confirmo|asistiré|asistire|asistencia)\b/.test(texto)) return { intencion: "CONFIRMAR", sintomas_detalles: "" };
-    if (/\b(dolor|fiebre|tos|síntoma|sintoma|mareo|náusea|nausea|malestar)\b/.test(texto)) {
+    if (/\b(dolor|duele|fiebre|tos|síntoma|sintoma|mareo|náusea|nausea|malestar|ardor|vomit|diarrea|sangrado|presión|presion)\b/.test(texto)) {
         return { intencion: "SINTOMAS", sintomas_detalles: consulta };
     }
     return { intencion: "OTRO", sintomas_detalles: "" };
@@ -100,10 +151,22 @@ async function crearClasificador() {
         const { GoogleGenAI } = require("@google/genai");
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
         const modelo = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
-        console.log(`[Gemini] Habilitada con modelo ${modelo}`);
+        debugLog(`[Gemini] Habilitada con modelo ${modelo}`);
+        const normalizarClasificacion = (resultado) => {
+            const intenciones = new Set(["CONFIRMAR", "CANCELAR", "SINTOMAS", "OTRO"]);
+            if (!resultado || typeof resultado !== "object" || !intenciones.has(resultado.intencion)) {
+                throw new Error("Gemini devolvió una clasificación inválida");
+            }
+            return {
+                intencion: resultado.intencion,
+                sintomas_detalles: typeof resultado.sintomas_detalles === "string"
+                    ? resultado.sintomas_detalles.trim()
+                    : ""
+            };
+        };
         const clasificar = async (consulta) => {
             try {
-                console.log(`[Gemini] Clasificando: "${consulta}"`);
+                debugLog(`[Gemini] Clasificando: "${consulta}"`);
                 const response = await ai.models.generateContent({
                     model: modelo,
                     contents: `Clasifica este mensaje de un paciente. Responde solo JSON válido con las claves intencion y sintomas_detalles. intencion debe ser CONFIRMAR, CANCELAR, SINTOMAS u OTRO. Mensaje: "${consulta}"`,
@@ -112,9 +175,10 @@ async function crearClasificador() {
                     }
                 });
                 const texto = typeof response.text === "function" ? response.text() : response.text;
-                const resultado = JSON.parse(String(texto).replace(/```json|```/g, "").trim());
-                console.log(`[Gemini] Clasificación: ${resultado.intencion}`);
-                return resultado;
+                const resultado = JSON.parse(String(texto).replace(/```json|```/gi, "").trim());
+                const clasificacion = normalizarClasificacion(resultado);
+                debugLog(`[Gemini] Clasificación: ${clasificacion.intencion}`);
+                return clasificacion;
             } catch (error) {
                 console.error(`[Gemini] Error clasificando: ${error.message}`);
                 throw error;
@@ -122,7 +186,7 @@ async function crearClasificador() {
         };
         const responder = async (consulta) => {
             try {
-                console.log(`[Gemini] Generando respuesta: "${consulta}"`);
+                debugLog(`[Gemini] Generando respuesta: "${consulta}"`);
                 const response = await ai.models.generateContent({
                     model: modelo,
                     contents: consulta,
@@ -131,7 +195,7 @@ async function crearClasificador() {
                     }
                 });
                 const texto = typeof response.text === "function" ? response.text() : response.text;
-                console.log("[Gemini] Respuesta generada correctamente");
+                debugLog("[Gemini] Respuesta generada correctamente");
                 return texto;
             } catch (error) {
                 console.error(`[Gemini] Error generando respuesta: ${error.message}`);
@@ -163,6 +227,7 @@ async function iniciarWhatsApp({ query }) {
     }
 
     const gemini = await crearClasificador();
+    programarLimpiezaConversaciones();
     const client = new Client({ authStrategy: new LocalAuth({ clientId: "clinicita" }) });
 
     client.on("qr", (qr) => qrcode.generate(qr, { small: true }));
@@ -188,10 +253,10 @@ async function iniciarWhatsApp({ query }) {
     return client;
 }
 
-async function obtenerCitaActiva(query, telefono) {
+async function obtenerCitasActivas(query, telefono) {
     const numero = limpiarTelefono(telefono.telefono);
     const lid = telefono.lid;
-    if (!numero && !lid) return null;
+    if (!numero && !lid) return [];
 
     const filas = await query(`
         SELECT c.cita_id, c.fecha_cita, c.hora_cita, c.estado, c.paciente_id,
@@ -207,51 +272,89 @@ async function obtenerCitaActiva(query, telefono) {
     `);
 
     if (lid) {
-        const citaPorLid = filas.find((fila) => fila.whatsapp_lid === lid);
-        if (citaPorLid) return citaPorLid;
+        const citasPorLid = filas.filter((fila) => fila.whatsapp_lid === lid);
+        if (citasPorLid.length) return citasPorLid;
     }
-    if (!numero) return null;
+    if (!numero) return [];
     const ultimosDigitos = numero.slice(-10);
-    return filas.find((fila) => limpiarTelefono(fila.telefono_whatsapp).slice(-10) === ultimosDigitos) || null;
+    return filas.filter((fila) => limpiarTelefono(fila.telefono_whatsapp).slice(-10) === ultimosDigitos);
 }
 
-async function vincularLid(query, lid, consulta) {
+function seleccionarCita(citas, consulta) {
+    const indice = Number.parseInt(consulta.match(/^(?:cita\s*)?(\d+)$/i)?.[1] || "", 10);
+    return Number.isInteger(indice) && indice > 0 && indice <= citas.length ? citas[indice - 1] : null;
+}
+
+function formatoOpcionesCitas(citas) {
+    return citas.map((cita, indice) => {
+        return `${indice + 1}. ${formatoCita(cita)}`;
+    }).join("\n");
+}
+
+function formatoCita(cita) {
+    const fecha = fechaCita(cita);
+    const fechaTexto = fecha
+        ? fecha.toLocaleString("es-CO", { timeZone: CLINIC_TIMEZONE, dateStyle: "medium", timeStyle: "short" })
+        : `${cita.fecha_cita} ${cita.hora_cita}`;
+    return `${fechaTexto} (${cita.especialidad})`;
+}
+
+async function asegurarRecordatorio(query, citaId) {
+    await query(`
+        INSERT INTO recordatorios (cita_id, canal_envio, estado_entrega)
+        SELECT ?, 'WhatsApp', 'Pendiente'
+        WHERE NOT EXISTS (SELECT 1 FROM recordatorios WHERE cita_id = ?)
+    `, [citaId, citaId]);
+}
+
+async function vincularLid(query, lid, consulta, telefono) {
     const coincidencia = consulta.match(/^vincular\s+(\d{5,20})\s+(\d{4})$/i);
     if (!coincidencia) return false;
 
     const [, documento, ultimosCuatro] = coincidencia;
     const pacientes = await query(
-        "SELECT paciente_id, nombre_completo, telefono_whatsapp FROM pacientes WHERE documento_id = ? LIMIT 1",
+        `SELECT p.paciente_id, p.nombre_completo, p.telefono_whatsapp, c.cita_id
+         FROM pacientes p
+         JOIN citas c ON c.paciente_id = p.paciente_id
+         WHERE p.documento_id = ?
+           AND c.estado IN ('Pendiente', 'Confirmada')
+         ORDER BY c.fecha_cita, c.hora_cita
+         LIMIT 1`,
         [documento]
     );
     const paciente = pacientes[0];
-    if (!paciente || limpiarTelefono(paciente.telefono_whatsapp).slice(-4) !== ultimosCuatro) return "invalido";
+    if (!paciente
+        || limpiarTelefono(telefono) !== limpiarTelefono(paciente.telefono_whatsapp)
+        || limpiarTelefono(paciente.telefono_whatsapp).slice(-4) !== ultimosCuatro) {
+        return "invalido";
+    }
 
     await query("UPDATE pacientes SET whatsapp_lid = ? WHERE paciente_id = ?", [lid, paciente.paciente_id]);
-    console.log(`[WhatsApp] LID ${lid} vinculado al paciente ${paciente.paciente_id}`);
+    debugLog(`[WhatsApp] LID ${lid} vinculado al paciente ${paciente.paciente_id}`);
     return paciente.nombre_completo;
 }
 
 async function procesarMensaje({ client, msg, consulta, query, clasificar, responder }) {
     const lid = String(msg.from).endsWith("@lid") ? msg.from : null;
     const chatKey = lid || msg.from;
+    const telefono = await obtenerTelefonoEntrante(client, msg);
+    const contextoInicial = obtenerConversacion(chatKey);
+    if (contextoInicial?.estado === "silencioso") return;
+
     if (lid && /^vincular\b/i.test(consulta)) {
-        const vinculacion = await vincularLid(query, lid, consulta);
-        if (vinculacion === "invalido") {
-            await msg.reply("No pudimos validar los datos. Escribe: VINCULAR espacio número de documento espacio últimos 4 dígitos del teléfono. Ejemplo: VINCULAR 1001234567 4567");
-        } else if (vinculacion) {
+        const vinculacion = await vincularLid(query, lid, consulta, telefono);
+        if (vinculacion && vinculacion !== "invalido") {
             await msg.reply(`Número vinculado correctamente a ${vinculacion}. Ya puedes escribir CONFIRMAR o CANCELAR.`);
-        } else {
-            await msg.reply("Para vincular este WhatsApp escribe: VINCULAR espacio número de documento espacio últimos 4 dígitos del teléfono. Ejemplo: VINCULAR 1001234567 4567");
         }
         return;
     }
-
-    const telefono = await obtenerTelefonoEntrante(client, msg);
-    console.log(`Mensaje WhatsApp recibido: from=${msg.from}, telefono=${telefono || "no disponible"}`);
-    let cita = await obtenerCitaActiva(query, { telefono, lid });
-    if (!cita && conversaciones.has(chatKey)) {
-        const contexto = conversaciones.get(chatKey);
+    debugLog(`Mensaje WhatsApp recibido: from=${msg.from}, telefono=${telefono || "no disponible"}`);
+    const citasActivas = await obtenerCitasActivas(query, { telefono, lid });
+    let cita = contextoInicial?.citaId
+        ? citasActivas.find((citaActiva) => citaActiva.cita_id === contextoInicial.citaId)
+        : seleccionarCita(citasActivas, consulta);
+    if (!cita && contextoInicial?.citaId) {
+        const contexto = contextoInicial;
         const citas = await query(`
             SELECT c.cita_id, c.fecha_cita, c.hora_cita, c.estado, c.paciente_id,
                    c.medico_id, p.nombre_completo AS paciente, p.telefono_whatsapp,
@@ -262,36 +365,52 @@ async function procesarMensaje({ client, msg, consulta, query, clasificar, respo
             WHERE c.cita_id = ?
         `, [contexto.citaId]);
         cita = citas[0] || null;
-        console.log(`[WhatsApp] Cita recuperada desde contexto: ${cita?.cita_id || "ninguna"}`);
+        debugLog(`[WhatsApp] Cita recuperada desde contexto: ${cita?.cita_id || "ninguna"}`);
+    }
+    if (!cita && citasActivas.length > 1) {
+        guardarConversacion(chatKey, { ...(contextoInicial || {}), seleccionandoCita: true });
+        await msg.reply(`Tienes varias citas activas. Responde con el número de la cita que deseas gestionar:\n${formatoOpcionesCitas(citasActivas)}`);
+        return;
+    }
+    if (!cita) cita = citasActivas[0] || null;
+    if (cita && !contextoInicial?.citaId && contextoInicial?.seleccionandoCita && /^\s*(?:cita\s*)?\d+\s*$/i.test(consulta)) {
+        guardarConversacion(chatKey, { ...contextoInicial, citaId: cita.cita_id, pacienteId: cita.paciente_id, seleccionandoCita: false });
+        await msg.reply(`Seleccionaste la cita del ${formatoCita(cita)}. Ahora responde CONFIRMAR o CANCELAR.`);
+        return;
     }
     if (cita && lid && cita.whatsapp_lid !== lid) {
         await query("UPDATE pacientes SET whatsapp_lid = ? WHERE paciente_id = ?", [lid, cita.paciente_id]);
     }
     if (!cita) {
-        await msg.reply(lid
-            ? "No encontramos una cita asociada. Si es la primera vez, escribe exactamente: VINCULAR seguido de tu número de documento, un espacio y los últimos 4 dígitos de tu teléfono. Ejemplo: VINCULAR 1001234567 4567"
-            : "No encontramos una cita próxima asociada a este número. Puedes consultar o agendar desde el portal web de CliniCita.");
         return;
     }
 
-    const contexto = conversaciones.get(chatKey) || {};
-    if (contexto.estado === "silencioso") return;
+    const contexto = obtenerConversacion(chatKey) || {};
 
     if (contexto.esperandoConfirmacionSintomas) {
         if (esRespuestaNegativa(consulta)) {
-            conversaciones.set(chatKey, { ...contexto, estado: "silencioso", esperandoConfirmacionSintomas: false });
+            guardarConversacion(chatKey, { ...contexto, estado: "silencioso", esperandoConfirmacionSintomas: false });
             return;
         }
         if (esRespuestaAfirmativa(consulta)) {
-            conversaciones.set(chatKey, { ...contexto, esperandoConfirmacionSintomas: false });
+            guardarConversacion(chatKey, { ...contexto, esperandoConfirmacionSintomas: false });
             await msg.reply("Claro. Escribe los síntomas o el motivo de consulta que deseas agregar o corregir.");
             return;
         }
     }
 
-    conversaciones.set(chatKey, { ...contexto, citaId: cita.cita_id, pacienteId: cita.paciente_id });
-    const clasificacion = clasificar ? await clasificar(consulta).catch(() => clasificarLocal(consulta)) : clasificarLocal(consulta);
-    if (!clasificar) console.log(`[Gemini] Se usará clasificación local para: "${consulta}"`);
+    guardarConversacion(chatKey, { ...contexto, citaId: cita.cita_id, pacienteId: cita.paciente_id, seleccionandoCita: false });
+    let clasificacion;
+    if (contexto.esperandoPreconsulta) {
+        if (/\b(confirmar|cancelar)\b/i.test(consulta)) {
+            await msg.reply("Por favor, describe brevemente tus síntomas o motivo de consulta para registrar tu preconsulta.");
+            return;
+        }
+        clasificacion = { intencion: "SINTOMAS", sintomas_detalles: consulta };
+    } else {
+        clasificacion = clasificar ? await clasificar(consulta).catch(() => clasificarLocal(consulta)) : clasificarLocal(consulta);
+    }
+    if (!clasificar) debugLog(`[Gemini] Se usará clasificación local para: "${consulta}"`);
     const intencion = clasificacion.intencion;
 
     if (intencion === "CANCELAR") {
@@ -308,14 +427,20 @@ async function procesarMensaje({ client, msg, consulta, query, clasificar, respo
 
         if (espera[0]) {
             const siguiente = espera[0];
-            await query(
+            const citaReasignada = await query(
                 "INSERT INTO citas (paciente_id, medico_id, fecha_cita, hora_cita, estado) VALUES (?, ?, ?, ?, 'Pendiente')",
                 [siguiente.paciente_id, cita.medico_id, cita.fecha_cita, cita.hora_cita]
             );
+            await asegurarRecordatorio(query, citaReasignada.insertId);
             await query("UPDATE lista_espera SET estado_espera = 'Asignado' WHERE espera_id = ?", [siguiente.espera_id]);
             const fechaReasignada = fechaCita(cita);
             if (fechaReasignada) {
-                await enviarWhatsApp(client, siguiente.telefono_whatsapp, `Hola ${siguiente.nombre_completo}. Se liberó un turno de ${cita.especialidad} para el ${fechaReasignada.toLocaleString("es-CO")}. Responde CONFIRMAR para confirmar tu asistencia.`);
+                await enviarWhatsApp(client, query, {
+                    pacienteId: siguiente.paciente_id,
+                    citaId: citaReasignada.insertId,
+                    telefono: siguiente.telefono_whatsapp,
+                    mensaje: `Hola ${siguiente.nombre_completo}. Se liberó un turno de ${cita.especialidad} para el ${fechaReasignada.toLocaleString("es-CO", { timeZone: CLINIC_TIMEZONE, dateStyle: "medium", timeStyle: "short" })}. Responde CONFIRMAR para confirmar tu asistencia.`
+                });
             }
         }
         await msg.reply(`Hola ${cita.paciente}, tu cita fue cancelada correctamente.`);
@@ -323,27 +448,28 @@ async function procesarMensaje({ client, msg, consulta, query, clasificar, respo
     }
 
     if (intencion === "CONFIRMAR") {
-        console.log(`[WhatsApp] Confirmando cita ${cita.cita_id} para ${cita.paciente}`);
+        debugLog(`[WhatsApp] Confirmando cita ${cita.cita_id} para ${cita.paciente}`);
         const resultado = await query("UPDATE citas SET estado = 'Confirmada' WHERE cita_id = ?", [cita.cita_id]);
-        console.log(`[WhatsApp] UPDATE confirmación: filas afectadas=${resultado.affectedRows}`);
+        debugLog(`[WhatsApp] UPDATE confirmación: filas afectadas=${resultado.affectedRows}`);
         const estadoActualizado = await query("SELECT estado FROM citas WHERE cita_id = ?", [cita.cita_id]);
-        console.log(`[WhatsApp] Estado guardado para cita ${cita.cita_id}: ${estadoActualizado[0]?.estado || "no encontrado"}`);
-        conversaciones.set(chatKey, { citaId: cita.cita_id, pacienteId: cita.paciente_id, esperandoPreconsulta: true });
+        debugLog(`[WhatsApp] Estado guardado para cita ${cita.cita_id}: ${estadoActualizado[0]?.estado || "no encontrado"}`);
+        guardarConversacion(chatKey, { citaId: cita.cita_id, pacienteId: cita.paciente_id, esperandoPreconsulta: true });
         await msg.reply(`Gracias por confirmar, ${cita.paciente}. Describe brevemente tus síntomas o motivo de consulta para registrar tu preconsulta.`);
         return;
     }
 
-    if (intencion === "SINTOMAS" || (cita.estado === "Confirmada" && consulta.length > 5)) {
+    if (intencion === "SINTOMAS") {
         await query(
             "INSERT INTO fichas_preconsulta (cita_id, paciente_id, sintomas) VALUES (?, ?, ?)",
             [cita.cita_id, cita.paciente_id, clasificacion.sintomas_detalles || consulta]
         );
-        conversaciones.set(chatKey, {
+        guardarConversacion(chatKey, {
             citaId: cita.cita_id,
             pacienteId: cita.paciente_id,
+            estado: "activo",
             esperandoConfirmacionSintomas: true
         });
-        console.log(`[WhatsApp] Preconsulta guardada para cita ${cita.cita_id}`);
+        debugLog(`[WhatsApp] Preconsulta guardada para cita ${cita.cita_id}`);
         await msg.reply("Registramos tu información de preconsulta. ¿Deseas cambiar o agregar algún síntoma? Responde SI o NO.");
         return;
     }
@@ -360,6 +486,7 @@ async function procesarMensaje({ client, msg, consulta, query, clasificar, respo
 async function enviarRecordatorios({ client, query }) {
     const citas = await query(`
         SELECT c.cita_id,
+               c.paciente_id,
                DATE_FORMAT(c.fecha_cita, '%Y-%m-%d') AS fecha_cita,
                TIME_FORMAT(c.hora_cita, '%H:%i:%s') AS hora_cita,
                p.nombre_completo AS paciente, p.telefono_whatsapp
@@ -378,10 +505,25 @@ async function enviarRecordatorios({ client, query }) {
             console.warn(`Cita ${cita.cita_id} tiene una fecha u hora inválida`);
             continue;
         }
-        const fecha = fechaCitaActual.toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" });
-        const enviado = await enviarWhatsApp(client, telefono, `Hola ${cita.paciente}. Te recordamos tu cita médica el ${fecha}. Responde CONFIRMAR o CANCELAR.`);
-        if (!enviado) continue;
+        const fecha = fechaCitaActual.toLocaleString("es-CO", { timeZone: CLINIC_TIMEZONE, dateStyle: "medium", timeStyle: "short" });
+        const enviado = await enviarWhatsApp(client, query, {
+            pacienteId: cita.paciente_id,
+            citaId: cita.cita_id,
+            telefono,
+            mensaje: `Hola ${cita.paciente}. Te recordamos tu cita médica el ${fecha}. Responde CONFIRMAR o CANCELAR.`
+        });
+
+        if (!enviado) {
+            // Antes: se ignoraba el fallo con "continue" y el registro
+            // se quedaba en "Pendiente" para siempre, sin dejar rastro
+            // de que se intentó enviar y falló.
+            await asegurarRecordatorio(query, cita.cita_id);
+            await query("UPDATE recordatorios SET fecha_envio = NOW(), estado_entrega = 'Fallido' WHERE cita_id = ?", [cita.cita_id]);
+            continue;
+        }
+
         await query("UPDATE citas SET recordatorio_enviado = 1 WHERE cita_id = ?", [cita.cita_id]);
+        await asegurarRecordatorio(query, cita.cita_id);
         await query("UPDATE recordatorios SET fecha_envio = NOW(), estado_entrega = 'Enviado' WHERE cita_id = ?", [cita.cita_id]);
     }
 }
