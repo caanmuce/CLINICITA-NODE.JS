@@ -1,4 +1,6 @@
 const cron = require("node-cron");
+const fs = require("node:fs");
+const path = require("node:path");
 const conversaciones = new Map();
 const CONVERSACION_TTL_MS = Number(process.env.WHATSAPP_CONVERSATION_TTL_MS) || 4 * 60 * 60 * 1000;
 const CLINIC_TIMEZONE = process.env.CLINIC_TIMEZONE || "America/Bogota";
@@ -228,7 +230,15 @@ async function iniciarWhatsApp({ query }) {
 
     const gemini = await crearClasificador();
     programarLimpiezaConversaciones();
-    const client = new Client({ authStrategy: new LocalAuth({ clientId: "clinicita" }) });
+    const chromePath = process.env.PUPPETEER_EXECUTABLE_PATH || [
+        process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, "Google", "Chrome", "Application", "chrome.exe"),
+        process.env["PROGRAMFILES(X86)"] && path.join(process.env["PROGRAMFILES(X86)"], "Google", "Chrome", "Application", "chrome.exe"),
+        process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Google", "Chrome", "Application", "chrome.exe")
+    ].find((candidate) => candidate && fs.existsSync(candidate));
+    const client = new Client({
+        authStrategy: new LocalAuth({ clientId: "clinicita" }),
+        ...(chromePath ? { puppeteer: { executablePath: chromePath } } : {})
+    });
 
     client.on("qr", (qr) => qrcode.generate(qr, { small: true }));
     client.on("ready", () => {

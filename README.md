@@ -126,6 +126,8 @@ El proyecto combina un frontend web responsive con un servidor **Node.js + Expre
    DEBUG=false
    GEMINI_API_KEY=
    GEMINI_MODEL=gemini-2.5-flash-lite
+   # Opcional: ruta de Chrome si no se encuentra automáticamente
+   # PUPPETEER_EXECUTABLE_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
    ```
 
    No subas `.env`, credenciales ni las carpetas de sesión de WhatsApp al repositorio.
@@ -148,7 +150,7 @@ Para activar los recordatorios:
 ENABLE_WHATSAPP=true
 ```
 
-Al iniciar el servidor aparecerá un código QR en la terminal. Escanéalo desde WhatsApp para vincular la sesión. El chatbot se activa por separado:
+Al iniciar el servidor aparecerá un código QR en la terminal. Escanéalo desde WhatsApp para vincular la sesión. En Windows se usa Chrome instalado en las ubicaciones habituales; si está en otra ubicación, configura `PUPPETEER_EXECUTABLE_PATH` en `.env`. El chatbot se activa por separado:
 
 ```env
 ENABLE_WHATSAPP_CHATBOT=true
