@@ -1,5 +1,32 @@
+const fs = require("fs");
+const path = require("path");
 const cron = require("node-cron");
 const conversaciones = new Map();
+
+function obtenerEjecutableChrome() {
+    const configurado = process.env.PUPPETEER_EXECUTABLE_PATH;
+    if (configurado) {
+        if (!fs.existsSync(configurado)) {
+            throw new Error(`PUPPETEER_EXECUTABLE_PATH no existe: ${configurado}`);
+        }
+        return configurado;
+    }
+
+    const ejecutablePuppeteer = require("puppeteer").executablePath();
+    if (fs.existsSync(ejecutablePuppeteer)) return ejecutablePuppeteer;
+
+    const directoriosChrome = [
+        process.env.PROGRAMFILES,
+        process.env["PROGRAMFILES(X86)"],
+        process.env.LOCALAPPDATA,
+    ].filter(Boolean);
+    const chromeSistema = directoriosChrome
+        .map((directorio) => path.join(directorio, "Google", "Chrome", "Application", "chrome.exe"))
+        .find((ejecutable) => fs.existsSync(ejecutable));
+    if (chromeSistema) return chromeSistema;
+
+    throw new Error("No se encontró Chrome. Ejecuta `npx puppeteer browsers install chrome` o configura PUPPETEER_EXECUTABLE_PATH.");
+}
 
 function limpiarTelefono(telefono) {
     let numero = String(telefono || "").replace(/[^0-9]/g, "");
@@ -163,7 +190,10 @@ async function iniciarWhatsApp({ query }) {
     }
 
     const gemini = await crearClasificador();
-    const client = new Client({ authStrategy: new LocalAuth({ clientId: "clinicita" }) });
+    const client = new Client({
+        authStrategy: new LocalAuth({ clientId: "clinicita" }),
+        puppeteer: { executablePath: obtenerEjecutableChrome() },
+    });
 
     client.on("qr", (qr) => qrcode.generate(qr, { small: true }));
     client.on("ready", () => {
