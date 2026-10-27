@@ -61,6 +61,41 @@
     </div>
 </div>
 <script src="../../assets/js/app.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    const fechaInput = document.querySelector('#filtro-fecha [name="fecha"]');
+    const btnFiltrar = document.querySelector('#filtro-fecha button[type="button"]');
+
+    // Establecer fecha por defecto a hoy
+    if (fechaInput && !fechaInput.value) {
+        const hoy = new Date();
+        const offset = hoy.getTimezoneOffset() * 60000;
+        const localDate = new Date(hoy.getTime() - offset).toISOString().split('T')[0];
+        fechaInput.value = localDate;
+    }
+
+    if (btnFiltrar) {
+        btnFiltrar.addEventListener("click", () => {
+            cargarAgendaMedico();
+        });
+    }
+
+    // También permitir Enter en el input de fecha
+    if (fechaInput) {
+        fechaInput.addEventListener("keypress", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                cargarAgendaMedico();
+            }
+        });
+    }
+
+    // Cargar agenda inicial si hay fecha
+    if (fechaInput && fechaInput.value) {
+        cargarAgendaMedico();
+    }
+});
+</script>
 </body>
 </html>
 

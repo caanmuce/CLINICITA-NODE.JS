@@ -68,6 +68,25 @@
     </div>
 </div>
 <script src="../../assets/js/app.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    const btnBuscar = document.querySelector('#filtros-citas button[type="button"]');
+    if (btnBuscar) {
+        btnBuscar.addEventListener("click", () => {
+            cargarCitasRecepcionista();
+        });
+    }
+    // También permitir Enter en los inputs
+    document.querySelectorAll('#filtros-citas input, #filtros-citas select').forEach(el => {
+        el.addEventListener("keypress", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                cargarCitasRecepcionista();
+            }
+        });
+    });
+});
+</script>
 </body>
 </html>
 

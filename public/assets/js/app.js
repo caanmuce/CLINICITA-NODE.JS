@@ -161,7 +161,19 @@ document.addEventListener("DOMContentLoaded", () => {
             if (document.getElementById("kpi-proximas")) {
                 numerosDelKpi();
                 window.setInterval(numerosDelKpi, 15000);
-            }  
+            }
+
+            // Recepcionista: cargar citas con filtros y coloreo de riesgo
+            if (document.getElementById("tabla-citas")) {
+                cargarCitasRecepcionista();
+                window.setInterval(cargarCitasRecepcionista, 15000);
+            }
+
+            // Médico: cargar agenda y coloreo de riesgo
+            if (document.getElementById("tabla-agenda")) {
+                cargarAgendaMedico();
+                window.setInterval(cargarAgendaMedico, 15000);
+            }
 });
 
 async function cargarFormularioCita() {
@@ -600,4 +612,306 @@ async function cargarCitasParaReprogramar() {
             if (elemento) elemento.textContent = valor || "--";
         });
     });
+}
+
+/**
+ * Carga citas para el panel de recepcionista con filtros y coloreo de riesgo
+ */
+async function cargarCitasRecepcionista() {
+    const tbody = document.getElementById("tabla-citas");
+    const emptyState = document.querySelector(".empty-state");
+    if (!tbody) return;
+
+    try {
+        // Construir URL con filtros
+        const fecha = document.querySelector('[name="fecha"]')?.value || "";
+        const estado = document.querySelector('[name="estado"]')?.value || "";
+        const q = document.querySelector('[name="q"]')?.value || "";
+
+        const params = new URLSearchParams();
+        if (fecha) params.append("fecha", fecha);
+        if (estado) params.append("estado", estado.charAt(0).toUpperCase() + estado.slice(1)); // Capitalize
+        if (q) params.append("q", q);
+        params.append("page", "1");
+        params.append("limit", "50");
+
+        const respuesta = await api(`/citas/admin?${params.toString()}`);
+        const citas = respuesta.citas || [];
+
+        tbody.innerHTML = "";
+
+        if (citas.length === 0) {
+            if (emptyState) emptyState.classList.remove("d-none");
+            return;
+        }
+
+        if (emptyState) emptyState.classList.add("d-none");
+
+        // Poblar tabla con data-paciente-id para coloreo de riesgo
+        citas.forEach(cita => {
+            const fila = document.createElement("tr");
+            fila.setAttribute("data-paciente-id", cita.paciente_id);
+
+            const estadoBadge = getEstadoBadge(cita.estado);
+            fila.innerHTML = `
+                <td>${cita.fecha}</td>
+                <td>${cita.hora}</td>
+                <td>${cita.paciente} ${cita.documento_id ? `<br><small class="text-muted">${cita.documento_id}</small>` : ""}</td>
+                <td>${cita.medico}</td>
+                <td>${cita.especialidad || ""}</td>
+                <td>${estadoBadge}</td>
+                <td>
+                    <button class="btn btn-outline-clinicita btn-sm" data-accion="editar" data-cita-id="${cita.cita_id}" data-paciente-id="${cita.paciente_id}">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(fila);
+        });
+
+        // Aplicar coloreo de riesgo
+        await cargarYColorearRiesgos(tbody);
+
+    } catch (error) {
+        console.error("Error cargando citas recepcionista:", error);
+        mostrarAlerta(error.message, "danger");
+    }
+}
+
+/**
+ * Carga agenda para el panel de médico con coloreo de riesgo
+ */
+async function cargarAgendaMedico() {
+    const tbody = document.getElementById("tabla-agenda");
+    const emptyState = document.querySelector(".empty-state");
+    const fechaInput = document.querySelector('#filtro-fecha [name="fecha"]');
+
+    if (!tbody || !fechaInput) return;
+
+    const fecha = fechaInput.value;
+    if (!fecha) {
+        tbody.innerHTML = "";
+        if (emptyState) emptyState.classList.remove("d-none");
+        return;
+    }
+
+    try {
+        const respuesta = await api(`/citas/medico?fecha=${fecha}`);
+        const citas = respuesta.citas || [];
+        const kpis = respuesta.kpis || {};
+
+        // Actualizar KPIs
+        actualizarKPIs(kpis);
+
+        tbody.innerHTML = "";
+
+        if (citas.length === 0) {
+            if (emptyState) emptyState.classList.remove("d-none");
+            return;
+        }
+
+        if (emptyState) emptyState.classList.add("d-none");
+
+        // Poblar tabla con data-paciente-id para coloreo de riesgo
+        citas.forEach(cita => {
+            const fila = document.createElement("tr");
+            fila.setAttribute("data-paciente-id", cita.paciente_id);
+
+            const estadoBadge = getEstadoBadge(cita.estado);
+            fila.innerHTML = `
+                <td>${cita.hora}</td>
+                <td>${cita.paciente} ${cita.documento_id ? `<br><small class="text-muted">${cita.documento_id}</small>` : ""}</td>
+                <td>${cita.documento_id || ""}</td>
+                <td>${cita.motivo || ""}</td>
+                <td>${estadoBadge}</td>
+                <td>
+                    <button class="btn btn-outline-clinicita btn-sm" data-accion="cambiar-estado" data-cita-id="${cita.cita_id}" data-paciente-id="${cita.paciente_id}">
+                        <i class="bi bi-check-circle"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(fila);
+        });
+
+        // Aplicar coloreo de riesgo
+        await cargarYColorearRiesgos(tbody);
+
+    } catch (error) {
+        console.error("Error cargando agenda médico:", error);
+        mostrarAlerta(error.message, "danger");
+    }
+}
+
+/**
+ * Genera badge HTML para el estado de la cita
+ */
+function getEstadoBadge(estado) {
+    const badges = {
+        "Pendiente": '<span class="badge bg-warning text-dark">Pendiente</span>',
+        "Confirmada": '<span class="badge bg-success">Confirmada</span>',
+        "Cancelada": '<span class="badge bg-danger">Cancelada</span>',
+        "No-Asistio": '<span class="badge bg-dark">No asistió</span>',
+        "Completada": '<span class="badge bg-primary">Completada</span>'
+    };
+    return badges[estado] || `<span class="badge bg-secondary">${estado}</span>`;
+}
+
+/**
+ * Actualiza los KPIs del médico
+ */
+function actualizarKPIs(kpis) {
+    const elementos = {
+        "Confirmada": document.querySelector(".kpi-card:nth-child(1) .kpi-value"),
+        "Pendiente": document.querySelector(".kpi-card:nth-child(2) .kpi-value"),
+        "Cancelada": document.querySelector(".kpi-card:nth-child(3) .kpi-value"),
+        "Completada": document.querySelector(".kpi-card:nth-child(4) .kpi-value")
+    };
+    Object.entries(elementos).forEach(([estado, el]) => {
+        if (el) el.textContent = kpis[estado.toLowerCase()] || kpis[estado] || 0;
+    });
+}
+
+// ============================================================
+// 1.6.2 FRONTEND: GESTIÓN DE RIESGO NO-SHOW
+// ============================================================
+
+/**
+ * Mapeo de niveles de riesgo a colores y clases CSS
+ */
+const RIESGO_COLORES = {
+    "Crítico": { bg: "#fee2e2", border: "#ef4444", texto: "#991b1b", badge: "bg-danger" },      // rojo
+    "Alto":    { bg: "#ffedd5", border: "#f97316", texto: "#9a3412", badge: "bg-warning" },      // naranja
+    "Medio":   { bg: "#fef9c3", border: "#eab308", texto: "#854d0e", badge: "bg-warning" },       // amarillo
+    "Bajo":    { bg: "#dcfce7", border: "#22c55e", texto: "#166534", badge: "bg-success" },       // verde
+    "Desconocido": { bg: "#f3f4f6", border: "#9ca3af", texto: "#374151", badge: "bg-secondary" } // gris
+};
+
+/**
+ * Obtiene el nivel de riesgo para una lista de pacientes (batch)
+ * @param {number[]} pacienteIds - Array de IDs de pacientes
+ * @returns {Promise<Object[]>} Array de objetos {paciente_id, nivel_riesgo, score, ...}
+ */
+async function obtenerRiesgosBatch(pacienteIds) {
+    if (!Array.isArray(pacienteIds) || pacienteIds.length === 0) return [];
+    try {
+        const respuesta = await api("/pacientes/riesgo/batch", {
+            method: "POST",
+            body: JSON.stringify({ paciente_ids: pacienteIds })
+        });
+        return respuesta.riesgos || [];
+    } catch (error) {
+        console.warn("[Riesgo] No se pudieron obtener riesgos en batch:", error.message);
+        return [];
+    }
+}
+
+/**
+ * Obtiene el nivel de riesgo para un solo paciente
+ * @param {number} pacienteId - ID del paciente
+ * @returns {Promise<Object|null>} Objeto con riesgo o null si error
+ */
+async function obtenerRiesgoPaciente(pacienteId) {
+    try {
+        const respuesta = await api(`/pacientes/${pacienteId}/riesgo`);
+        return respuesta.riesgo || null;
+    } catch (error) {
+        console.warn(`[Riesgo] No se pudo obtener riesgo para paciente ${pacienteId}:`, error.message);
+        return null;
+    }
+}
+
+/**
+ * Devuelve la configuración de color para un nivel de riesgo
+ * @param {string} nivelRiesgo - Nivel de riesgo (Crítico, Alto, Medio, Bajo)
+ * @returns {Object} Configuración de colores
+ */
+function getColorRiesgo(nivelRiesgo) {
+    return RIESGO_COLORES[nivelRiesgo] || RIESGO_COLORES["Desconocido"];
+}
+
+/**
+ * Aplica coloreo de riesgo a una fila de tabla
+ * @param {HTMLTableRowElement} fila - Elemento <tr> a colorear
+ * @param {string} nivelRiesgo - Nivel de riesgo del paciente
+ * @param {boolean} soloBadge - Si true, solo agrega badge en la primera celda; si false, colorea toda la fila
+ */
+function aplicarColorRiesgoFila(fila, nivelRiesgo, soloBadge = false) {
+    const color = getColorRiesgo(nivelRiesgo);
+
+    if (soloBadge) {
+        // Solo agregar badge en la primera celda (o en una celda específica)
+        const primeraCelda = fila.cells[0];
+        if (primeraCelda) {
+            const badge = document.createElement("span");
+            badge.className = `badge ${color.badge} ms-2`;
+            badge.textContent = nivelRiesgo;
+            badge.style.fontSize = "0.7rem";
+            primeraCelda.appendChild(badge);
+        }
+    } else {
+        // Colorear toda la fila
+        fila.style.backgroundColor = color.bg;
+        fila.style.borderLeft = `4px solid ${color.border}`;
+
+        // También agregar badge en la primera celda
+        const primeraCelda = fila.cells[0];
+        if (primeraCelda) {
+            const badge = document.createElement("span");
+            badge.className = `badge ${color.badge} ms-2`;
+            badge.textContent = nivelRiesgo;
+            badge.style.fontSize = "0.7rem";
+            primeraCelda.appendChild(badge);
+        }
+    }
+}
+
+/**
+ * Carga riesgos para las citas de una tabla y aplica coloreo
+ * @param {HTMLTableSectionElement} tbody - Elemento <tbody> de la tabla
+ * @param {string} columnaPacienteId - Nombre del atributo data- que contiene el paciente_id en cada fila
+ */
+async function cargarYColorearRiesgos(tbody, columnaPacienteId = "data-paciente-id") {
+    if (!tbody) return;
+
+    const filas = Array.from(tbody.querySelectorAll("tr"));
+    if (filas.length === 0) return;
+
+    // Extraer IDs únicos de pacientes
+    const pacienteIds = [...new Set(filas
+        .map(fila => parseInt(fila.getAttribute(columnaPacienteId)))
+        .filter(id => !isNaN(id))
+    )];
+
+    if (pacienteIds.length === 0) return;
+
+    // Obtener riesgos en batch
+    const riesgos = await obtenerRiesgosBatch(pacienteIds);
+
+    // Crear mapa para búsqueda rápida
+    const riesgoMap = new Map(riesgos.map(r => [r.paciente_id, r]));
+
+    // Aplicar colores a cada fila
+    filas.forEach(fila => {
+        const pacienteId = parseInt(fila.getAttribute(columnaPacienteId));
+        if (isNaN(pacienteId)) return;
+
+        const riesgo = riesgoMap.get(pacienteId);
+        if (riesgo && riesgo.nivel_riesgo) {
+            aplicarColorRiesgoFila(fila, riesgo.nivel_riesgo);
+        }
+    });
+}
+
+/**
+ * Función helper para que las páginas de recepcionista y médico
+ * puedan llamar fácilmente tras cargar sus tablas
+ * @param {string} tbodyId - ID del elemento tbody
+ */
+async function inicializarColoreoRiesgo(tbodyId) {
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+
+    // Esperar un poco a que la tabla se haya poblado (si se usa setInterval)
+    await new Promise(r => setTimeout(r, 100));
+    await cargarYColorearRiesgos(tbody);
 }
