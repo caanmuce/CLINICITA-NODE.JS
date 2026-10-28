@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CliniCita · API Testing Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ["Fraunces", "Georgia", "serif"],
+            sans: ["Instrument Sans", "system-ui", "sans-serif"],
+            mono: ["JetBrains Mono", "ui-monospace", "monospace"]
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    :root {
+      --bg: #eaf0ef;
+      --surface: #ffffff;
+      --line: #d3dedc;
+      --ink: #12302f;
+      --muted: #5b7371;
+      --teal: #0f766e;
+      --teal-soft: #d9efec;
+      --indigo: #4338ca;
+      --indigo-soft: #e4e3fb;
+      --ochre: #a16207;
+      --ochre-soft: #f8ecd0;
+      --blue: #0369a1;
+      --blue-soft: #dcecf6;
+      --plum: #86198f;
+      --plum-soft: #f3e2f5;
+      --console: #0e1e1d;
+    }
+    html { scroll-padding-top: 1rem; }
+    body {
+      background: var(--bg);
+      background-image:
+        radial-gradient(60rem 28rem at 100% -10%, #d6e8e5 0, transparent 70%),
+        radial-gradient(40rem 24rem at -10% 110%, #e3e6f7 0, transparent 70%);
+      background-attachment: fixed;
+      color: var(--ink);
+      font-family: "Instrument Sans", system-ui, sans-serif;
+    }
+    pre { tab-size: 2; }
+    .brand-mark {
+      display: grid;
+      width: 3rem;
+      height: 3rem;
+      flex-shrink: 0;
+      place-items: center;
+      border-radius: .75rem;
+      color: #fff;
+      background: var(--teal);
+    }
+    .brand-mark svg {
+      display: block;
+      width: 1.75rem;
+      height: 1.75rem;
+      max-width: 100%;
+      max-height: 100%;
+    }
+    .token-icon,
+    .footer-icon {
+      display: block;
+      flex-shrink: 0;
+      width: 1rem;
+      height: 1rem;
+      max-width: 1rem;
+      max-height: 1rem;
+    }
+    .ui-icon {
+      display: inline-block;
+      width: 1.1rem;
+      margin-right: .35rem;
+      font-size: 1rem !important;
+      line-height: 1;
+      vertical-align: -.08em;
+    }
+    :focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+    .card { padding: 1.5rem; background: var(--surface); border: 1px solid var(--line); border-radius: 1rem; box-shadow: 0 1px 0 rgba(18,48,47,.04), 0 12px 32px -18px rgba(18,48,47,.25); }
+    .service-card { padding: 0; }
+    .service-card > div:last-child { padding: 1.5rem; }
+    .role-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+    .token-row { display: flex; align-items: stretch; gap: .5rem; margin-top: 1.25rem; }
+    .token-box { display: flex; align-items: center; min-width: 0; flex: 1 1 auto; }
+    .token-box input { min-width: 0; flex: 1 1 auto; }
+    .token-row .btn { flex: 0 0 auto; }
+    .muted { color: var(--muted); }
+
+    .field {
+      width: 100%; border-radius: .5rem; border: 1px solid var(--line); background: #f7faf9;
+      padding: .6rem .75rem; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .8rem;
+      color: var(--ink); transition: border-color .15s, box-shadow .15s, background .15s;
+    }
+    .field:focus { outline: none; background: #fff; border-color: var(--teal); box-shadow: 0 0 0 3px rgba(15,118,110,.15); }
+
+    .btn { border-radius: .5rem; font-size: .875rem; font-weight: 600; padding: .65rem 1rem; transition: background .15s, border-color .15s, color .15s, transform .05s; }
+    .btn:active { transform: translateY(1px); }
+    .btn-ml-solid { background: var(--teal); color: #fff; }
+    .btn-ml-solid:hover { background: #0b5f58; }
+    .btn-ml { border: 1px solid #9fd0cb; color: var(--teal); background: #fff; }
+    .btn-ml:hover { background: var(--teal-soft); border-color: var(--teal); }
+    .btn-nd-solid { background: var(--indigo); color: #fff; }
+    .btn-nd-solid:hover { background: #372fa8; }
+    .btn-nd { border: 1px solid #bcb8ee; color: var(--indigo); background: #fff; }
+    .btn-nd:hover { background: var(--indigo-soft); border-color: var(--indigo); }
+    .btn-warn { border: 1px solid #e4c477; color: var(--ochre); background: var(--ochre-soft); }
+    .btn-warn:hover { background: #f3e0ae; border-color: var(--ochre); }
+    .btn-ghost { border: 1px solid var(--line); color: var(--muted); background: #fff; font-weight: 500; }
+    .btn-ghost:hover { border-color: var(--teal); color: var(--teal); }
+    .btn-danger { border: 1px solid #f0c0c0; color: #b42318; background: #fff; font-weight: 500; }
+    .btn-danger:hover { background: #fdeceb; border-color: #e58a84; }
+
+    .service-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; }
+    .form-stack { display: flex; flex-direction: column; gap: 1rem; }
+    .form-row { display: flex; align-items: stretch; gap: .5rem; }
+    .form-row .field { flex: 0 0 7rem; }
+    .form-row .btn { flex: 1 1 auto; }
+    .action-btn { width: 100%; min-height: 2.75rem; display: inline-flex; align-items: center; justify-content: center; text-align: center; line-height: 1.3; }
+    .step .field { display: block; box-sizing: border-box; }
+    .step > .field { margin-bottom: .5rem; }
+    .section-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; }
+    .section-title h2 { margin: 0; }
+    .section-title p { margin: .25rem 0 0; }
+    .service-card { min-width: 0; }
+    @media (max-width: 760px) {
+      .service-grid { grid-template-columns: 1fr; }
+      .role-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 520px) {
+      .form-row { flex-direction: column; }
+      .form-row .field { flex-basis: auto; }
+      .role { min-height: 4.5rem; }
+      .token-row { flex-direction: column; }
+    }
+
+    .role { position: relative; border-radius: .75rem; border: 1px solid var(--line); background: #fbfdfc; padding: .9rem 1rem .9rem 1.25rem; text-align: left; transition: background .15s, border-color .15s, box-shadow .15s; overflow: hidden; }
+    .role::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--c); }
+    .role:hover { background: var(--cs); border-color: var(--c); box-shadow: 0 8px 20px -14px var(--c); }
+    .role .name { display: block; font-weight: 600; color: var(--c); }
+    .role .mail { display: block; margin-top: .15rem; font-size: .75rem; color: var(--muted); }
+    .role-admin { --c: var(--ochre); --cs: var(--ochre-soft); }
+    .role-rec { --c: var(--blue); --cs: var(--blue-soft); }
+    .role-pat { --c: var(--plum); --cs: var(--plum-soft); }
+
+    .svc-top { height: 4px; border-radius: 1rem 1rem 0 0; }
+    .step { border-top: 1px dashed var(--line); padding-top: 1rem; }
+
+    .console { background: var(--console); border-radius: 1rem; border: 1px solid #1d3836; box-shadow: 0 24px 48px -28px rgba(8,24,23,.7); overflow: hidden; }
+    .console-bar { border-bottom: 1px solid #1d3836; background: #102625; }
+    #output::-webkit-scrollbar { height: 8px; width: 8px; }
+    #output::-webkit-scrollbar-thumb { background: #2a4947; border-radius: 8px; }
+
+    code.kbd { background: #fff; border: 1px solid #ecd9a6; border-radius: .375rem; padding: .05rem .4rem; font-family: "JetBrains Mono", monospace; font-size: .75rem; color: #7a4a05; }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+  </style>
+</head>
+<body class="min-h-screen">
+  <main class="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+
+    <header class="mb-8 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+      <div class="flex items-start gap-4">
+        <div class="brand-mark mt-1" aria-hidden="true">
+          <svg viewBox="0 0 24 24" class="h-7 w-7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        </div>
+        <div>
+          <h1 class="font-display text-4xl font-bold tracking-tight sm:text-5xl" style="color: var(--ink)">CliniCita</h1>
+          <p class="mt-1 text-base font-medium" style="color: var(--teal)">API Testing Dashboard</p>
+          <p class="muted mt-2 max-w-xl text-sm leading-6">Prueba autenticación, backend Node.js y Machine Learning sin usar curl.</p>
+        </div>
+      </div>
+      <div class="inline-flex items-center gap-2 self-start rounded-full border px-3 py-1.5 text-xs font-medium sm:self-auto" style="border-color:#a8d9c2; background:#e3f5ec; color:#14633f">
+        <span class="inline-block h-2 w-2 rounded-full" style="background:#22a06b"></span>
+        Panel local · <span id="originLabel" class="font-mono"></span>
+      </div>
+    </header>
+
+    <section class="card mb-6 p-5 sm:p-6">
+      <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="font-display text-xl font-semibold">Autenticación JWT</h2>
+          <p class="muted mt-1 text-sm">Los accesos rápidos usan las cuentas de prueba configuradas en el proyecto.</p>
+        </div>
+        <div id="activeUser" class="rounded-full border px-3 py-1 text-xs font-medium" style="border-color: var(--line); background:#f1f6f5; color: var(--muted)">Sin sesión</div>
+      </div>
+
+      <div class="role-grid">
+        <button data-login="admin" class="login-btn role role-admin">
+          <span class="name"><span class="ui-icon" aria-hidden="true">👑</span>Admin</span>
+          <span class="mail">administrador · admin@clinicita.com</span>
+        </button>
+        <button data-login="receptionist" class="login-btn role role-rec">
+          <span class="name"><span class="ui-icon" aria-hidden="true">👩‍⚕️</span>Recepcionista</span>
+          <span class="mail">recepcionista · recepcion@clinicita.com</span>
+        </button>
+        <button data-login="patient" class="login-btn role role-pat">
+          <span class="name"><span class="ui-icon" aria-hidden="true">👤</span>Paciente</span>
+          <span class="mail">paciente · paciente@clinicita.com</span>
+        </button>
+      </div>
+
+      <div class="token-row">
+        <div class="token-box rounded-lg border px-3 py-2" style="border-color: var(--line); background:#f7faf9">
+          <svg viewBox="0 0 24 24" class="token-icon mr-2" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></svg>
+          <input id="token" readonly aria-label="Token JWT" class="min-w-0 flex-1 bg-transparent font-mono text-xs outline-none" style="color: var(--teal)" placeholder="Inicia sesión para obtener un token">
+        </div>
+        <button id="copyToken" class="btn btn-ghost">Copiar token</button>
+        <button id="clearToken" class="btn btn-danger">Limpiar</button>
+      </div>
+    </section>
+
+    <div class="service-grid">
+      <section class="card service-card overflow-hidden">
+        <div class="svc-top" style="background: var(--teal)"></div>
+        <div class="p-5 sm:p-6">
+          <div class="section-title">
+            <div>
+              <h2 class="font-display text-xl font-semibold">Machine Learning directo</h2>
+              <p class="mt-1 font-mono text-xs" style="color: var(--teal)">http://localhost:8000</p>
+            </div>
+            <span class="shrink-0 rounded-full px-2.5 py-1 text-xs font-medium" style="background: var(--teal-soft); color: var(--teal)">sin JWT</span>
+          </div>
+          <div class="form-stack">
+            <button data-action="ml-health" class="action-btn btn btn-ml-solid w-full"><span class="ui-icon" aria-hidden="true">🟢</span>Check Health</button>
+            <div class="step">
+              <label for="mlPatientId" class="muted mb-2 block text-sm">ID de paciente</label>
+              <div class="form-row">
+                <input id="mlPatientId" type="number" min="1" value="1" class="field">
+                <button data-action="ml-risk" class="action-btn btn btn-ml"><span class="ui-icon" aria-hidden="true">🔍</span>Consultar Riesgo Individual</button>
+              </div>
+            </div>
+            <div class="step">
+              <label for="mlBatchIds" class="muted mb-2 block text-sm">IDs separados por coma</label>
+              <input id="mlBatchIds" value="1, 2, 3, 4, 5" class="field mb-2">
+              <button data-action="ml-batch" class="action-btn btn btn-ml w-full"><span class="ui-icon" aria-hidden="true">📦</span>Predicción Batch (ML)</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card service-card overflow-hidden">
+        <div class="svc-top" style="background: var(--indigo)"></div>
+        <div class="p-5 sm:p-6">
+          <div class="section-title">
+            <div>
+              <h2 class="font-display text-xl font-semibold">Backend Node.js</h2>
+              <p class="mt-1 font-mono text-xs" style="color: var(--indigo)">http://localhost:3000</p>
+            </div>
+            <span class="shrink-0 rounded-full px-2.5 py-1 text-xs font-medium" style="background: var(--indigo-soft); color: var(--indigo)">requiere JWT</span>
+          </div>
+          <div class="form-stack">
+            <button data-action="node-me-risk" class="action-btn btn btn-nd-solid w-full"><span class="ui-icon" aria-hidden="true">👤</span>Ver Mi Riesgo (Paciente)</button>
+            <div class="step">
+              <label for="nodeBatchIds" class="muted mb-2 block text-sm">IDs separados por coma</label>
+              <input id="nodeBatchIds" value="1, 2, 3, 10, 20" class="field mb-2">
+              <button data-action="node-batch" class="action-btn btn btn-nd w-full"><span class="ui-icon" aria-hidden="true">📋</span>Batch Recepcionista</button>
+            </div>
+            <div class="step">
+              <button data-action="node-recalculate" class="action-btn btn btn-warn w-full"><span class="ui-icon" aria-hidden="true">⚡</span>Recálculo Masivo (Admin)</button>
+              <p class="muted mt-3 text-xs">Usa la sesión correspondiente al rol de cada operación.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="console mt-6">
+      <div class="console-bar flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+        <div class="min-w-0">
+          <h2 class="font-display text-lg font-semibold text-white">Consola de respuestas</h2>
+          <p id="requestMeta" class="mt-0.5 break-all font-mono text-xs" style="color:#8fb0ad">Esperando una solicitud...</p>
+        </div>
+        <button id="clearOutput" class="rounded-lg border px-3 py-1.5 text-xs font-medium transition hover:text-white" style="border-color:#2a4947; color:#8fb0ad">Limpiar consola</button>
+      </div>
+      <div id="loading" class="hidden items-center gap-2 border-b px-5 py-3 text-sm" style="border-color:#1d3836; color:#6ee7d8">
+        <span class="h-3 w-3 animate-spin rounded-full border-2 border-t-transparent" style="border-color:#6ee7d8; border-top-color:transparent"></span>
+        Enviando solicitud...
+      </div>
+      <pre id="output" class="min-h-64 max-h-[32rem] overflow-auto p-5 font-mono text-xs leading-6" style="color:#c9e3e0">// Las respuestas JSON aparecerán aquí.</pre>
+    </section>
+
+    <footer class="mt-6 flex gap-3 rounded-xl border p-4 text-xs leading-5" style="border-color:#ecd9a6; background:#fdf6e3; color:#6b4a0a">
+      <svg viewBox="0 0 24 24" class="footer-icon mt-0.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+      <p>
+        <strong>CORS:</strong> abre este panel desde
+        <code class="kbd">http://localhost:3000/test-panel.html</code>,
+        no con doble clic desde <code class="kbd">file://</code>.
+        El backend ya permite el origen local mediante <code class="kbd">cors()</code>.
+      </p>
+    </footer>
+  </main>
+
+  <script>
+    const ML_BASE = "http://localhost:8000";
+    const NODE_BASE = "http://localhost:3000";
+    const SESSION_KEY = "clinicita_test_panel_session";
+    const credentials = {
+      admin: { correo: "admin@clinicita.com", clave: "admin123", rol: "administrador" },
+      receptionist: { correo: "recepcion@clinicita.com", clave: "recepcion123", rol: "recepcionista" },
+      patient: { correo: "paciente@clinicita.com", clave: "paciente123", rol: "paciente" }
+    };
+    let session = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+
+    const $ = (id) => document.getElementById(id);
+    $("originLabel").textContent = location.origin === "null" ? "file:// (CORS)" : location.origin;
+
+    function renderSession() {
+      $("token").value = session?.token || "";
+      $("activeUser").textContent = session
+        ? `${session.usuario?.rol || "sesión"} · ${session.usuario?.correo || ""}`
+        : "Sin sesión";
+    }
+
+    function idsFrom(inputId) {
+      const ids = $(inputId).value.split(",").map((value) => Number(value.trim())).filter(Number.isInteger);
+      if (!ids.length || ids.some((id) => id < 1)) throw new Error("Introduce IDs numéricos válidos, separados por coma.");
+      if (ids.length > 100) throw new Error("El máximo permitido es 100 IDs.");
+      return ids;
+    }
+
+    function setLoading(value) {
+      $("loading").classList.toggle("hidden", !value);
+      $("loading").classList.toggle("flex", value);
+    }
+
+    function showOutput({ status, duration, method, url, data }) {
+      const statusClass = status >= 200 && status < 300 ? "text-emerald-400" : "text-rose-400";
+      $("requestMeta").innerHTML = `<span class="${statusClass}">${status} ${status >= 200 && status < 300 ? "OK" : "ERROR"}</span> · ${method} ${url} · ${duration} ms`;
+      $("output").textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function request(url, options = {}) {
+      const started = performance.now();
+      setLoading(true);
+      try {
+        const response = await fetch(url, options);
+        const text = await response.text();
+        let data;
+        try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+        showOutput({ status: response.status, duration: Math.round(performance.now() - started), method: options.method || "GET", url, data });
+        return { response, data };
+      } catch (error) {
+        showOutput({ status: 0, duration: Math.round(performance.now() - started), method: options.method || "GET", url, data: { error: error.message, hint: "Verifica que el backend/ML esté ejecutándose y que abras el panel desde localhost:3000." } });
+        throw error;
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    async function login(kind) {
+      const { data } = await request(`${NODE_BASE}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(credentials[kind])
+      });
+      if (data.token) {
+        session = data;
+        localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+        renderSession();
+      }
+    }
+
+    function authHeaders() {
+      if (!session?.token) throw new Error("Inicia sesión primero con uno de los botones de acceso rápido.");
+      return { Authorization: `Bearer ${session.token}` };
+    }
+
+    async function runAction(action) {
+      switch (action) {
+        case "ml-health":
+          return request(`${ML_BASE}/health`);
+        case "ml-risk":
+          return request(`${ML_BASE}/riesgo/${Number($("mlPatientId").value)}`);
+        case "ml-batch":
+          return request(`${ML_BASE}/riesgo/batch`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ paciente_ids: idsFrom("mlBatchIds") })
+          });
+        case "node-me-risk":
+          return request(`${NODE_BASE}/api/pacientes/me/riesgo`, { headers: authHeaders() });
+        case "node-batch":
+          return request(`${NODE_BASE}/api/pacientes/riesgo/batch`, {
+            method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
+            body: JSON.stringify({ paciente_ids: idsFrom("nodeBatchIds") })
+          });
+        case "node-recalculate":
+          return request(`${NODE_BASE}/api/pacientes/riesgo/recalcular-todos`, {
+            method: "POST", headers: authHeaders()
+          });
+      }
+    }
+
+    document.querySelectorAll("[data-login]").forEach((button) => {
+      button.addEventListener("click", () => login(button.dataset.login).catch(() => {}));
+    });
+    document.querySelectorAll("[data-action]").forEach((button) => {
+      button.addEventListener("click", () => {
+        try { Promise.resolve(runAction(button.dataset.action)).catch(() => {}); }
+        catch (error) { showOutput({ status: 0, duration: 0, method: "LOCAL", url: button.dataset.action, data: { error: error.message } }); }
+      });
+    });
+    $("copyToken").addEventListener("click", async () => {
+      if ($("token").value) await navigator.clipboard.writeText($("token").value);
+    });
+    $("clearToken").addEventListener("click", () => {
+      session = null; localStorage.removeItem(SESSION_KEY); renderSession();
+    });
+    $("clearOutput").addEventListener("click", () => {
+      $("requestMeta").textContent = "Esperando una solicitud...";
+      $("output").textContent = "// Las respuestas JSON aparecerán aquí.";
+    });
+    renderSession();
+  </script>
+</body>
+</html>

@@ -7,6 +7,7 @@ xgboost==2.1.1
 scikit-learn==1.4.0
 optuna==3.6.1
 mlflow==2.12.1
+setuptools<81
 python-dotenv==1.0.1
 pydantic==2.6.1
 pydantic-settings==2.2.1

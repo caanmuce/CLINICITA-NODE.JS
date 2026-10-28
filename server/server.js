@@ -266,7 +266,7 @@ app.use((req, res, next) => {
 // Rate limiting
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 5, // máximo 5 intentos de login por IP
+    max: Number(process.env.AUTH_RATE_LIMIT_MAX || (process.env.NODE_ENV === "production" ? 5 : 50)),
     message: { mensaje: "Demasiados intentos, intente más tarde" },
     standardHeaders: true,
     legacyHeaders: false
@@ -288,6 +288,18 @@ try {
 } catch (e) {
     console.error("DEBUG: startup file write error:", e);
 }
+// El panel local usa Tailwind por CDN y JavaScript inline para pruebas manuales.
+app.use("/test-panel.html", (req, res, next) => {
+    res.setHeader(
+        "Content-Security-Policy",
+        "default-src 'self'; base-uri 'self'; font-src 'self' https: data:; form-action 'self'; " +
+        "frame-ancestors 'self'; img-src 'self' data:; object-src 'none'; " +
+        "script-src 'self' https://cdn.tailwindcss.com 'unsafe-inline'; " +
+        "style-src 'self' https: 'unsafe-inline'; " +
+        "connect-src 'self' http://localhost:8000 http://127.0.0.1:8000"
+    );
+    next();
+});
 app.use(express.static(path.join(__dirname, "..", "public"), (req, res, next) => {
     console.log("DEBUG: express.static middleware hit for:", req.path);
     next();

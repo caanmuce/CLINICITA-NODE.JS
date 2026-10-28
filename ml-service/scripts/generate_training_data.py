@@ -10,15 +10,25 @@ import random
 from datetime import datetime, timedelta, date
 from typing import List, Dict
 import sys
-
+import io
 import os
+
+# Configurar codificación UTF-8 para consola en Windows
+if sys.platform == "win32":
+    try:
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8')
+        else:
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 # Configuración de BD - usar variables de entorno o defaults
 DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "mysql"),
+    "host": os.getenv("DB_HOST", "localhost"),
     "port": int(os.getenv("DB_PORT", "3306")),
     "user": os.getenv("DB_USER", "root"),
-    "password": os.getenv("DB_PASSWORD", "clinicita123"),
+    "password": os.getenv("DB_PASSWORD", ""),
     "database": os.getenv("DB_NAME", "clinicitabd"),
     "charset": "utf8mb4",
     "cursorclass": pymysql.cursors.DictCursor,
@@ -39,16 +49,13 @@ APELLIDOS = [
     "Navarro", "Torres", "Domínguez", "Vázquez", "Ramos", "Gil", "Ramírez"
 ]
 
-
 def generate_nombre_completo():
     return f"{random.choice(NOMBRES)} {random.choice(APELLIDOS)} {random.choice(APELLIDOS)}"
-
 
 def generate_documento_id(paciente_id: int) -> str:
     num = 10000000 + paciente_id * 12345 + random.randint(0, 99999)
     letra = "TRWAGMYFPDXBNJZSQVHLCKE"[num % 23]
     return f"{num}{letra}"
-
 
 def generate_telefono_whatsapp() -> str:
     prefix = random.choice(["6", "7"])
@@ -106,15 +113,13 @@ MEDICOS = [
 
 SEDES = [1, 2, 3]
 GENEROS = ["M", "F"]
-CANALES = ["WhatsApp", "SMS", "WhatsApp+SMS", "Email", "Llamada"]
+CANALES = ["WhatsApp", "SMS", "Email"]
 ESTADOS_CITA = ["Completada", "No-Asistio", "Cancelada", "Confirmada", "Pendiente"]
-ESTADOS_ENTREGA = ["Entregado", "Pendiente", "Fallido", "Leido"]
+ESTADOS_ENTREGA = ["Entregado", "Pendiente", "Fallido"]
 RESPUESTAS = [None, 0, 1]  # None = no respuesta, 0 = no confirma, 1 = confirma
-
 
 def get_connection():
     return pymysql.connect(**DB_CONFIG)
-
 
 def clear_existing_data(cursor):
     """Limpia datos de prueba anteriores (mantiene estructura)"""
@@ -123,7 +128,6 @@ def clear_existing_data(cursor):
     cursor.execute("DELETE FROM citas WHERE paciente_id > 8")
     cursor.execute("DELETE FROM pacientes WHERE paciente_id > 8")
     print("Datos de prueba anteriores eliminados")
-
 
 def insert_pacientes(cursor, n_pacientes: int = 300) -> List[Dict]:
     """Inserta pacientes con perfiles de riesgo variados"""
@@ -180,7 +184,6 @@ def insert_pacientes(cursor, n_pacientes: int = 300) -> List[Dict]:
 
     print(f"Insertados {len(pacientes)} pacientes nuevos")
     return pacientes
-
 
 def generate_appointment_history(paciente: Dict, reference_date: date) -> List[Dict]:
     """Genera historial de citas para un paciente según su perfil"""
@@ -254,7 +257,6 @@ def generate_appointment_history(paciente: Dict, reference_date: date) -> List[D
 
     return citas
 
-
 def get_valid_schedules(cursor):
     """Obtiene horarios válidos de la base de datos"""
     cursor.execute("""
@@ -275,7 +277,6 @@ def get_valid_schedules(cursor):
             'hora_fin': s['hora_fin']
         })
     return schedule_map
-
 
 def generate_appointment_history(paciente: Dict, reference_date: date, valid_schedules: Dict) -> List[Dict]:
     """Genera historial de citas para un paciente según su perfil, usando horarios válidos"""
@@ -375,13 +376,11 @@ def generate_appointment_history(paciente: Dict, reference_date: date, valid_sch
 
     return citas
 
-
 def insert_citas_and_recordatorios(cursor, pacientes: List[Dict], reference_date: date):
     """Inserta citas y recordatorios para todos los pacientes"""
     # Obtener horarios válidos
     valid_schedules = get_valid_schedules(cursor)
 
-    cita_id = 41  # Continuar después de los 40 existentes
     total_citas = 0
     total_recordatorios = 0
 
@@ -389,13 +388,15 @@ def insert_citas_and_recordatorios(cursor, pacientes: List[Dict], reference_date
         citas = generate_appointment_history(paciente, reference_date, valid_schedules)
 
         for cita in citas:
-            # Insertar cita
+            # Insertar cita (permitir auto-incremento de cita_id)
             cursor.execute("""
-                INSERT INTO citas (cita_id, paciente_id, fecha_cita, hora_cita, estado,
+                INSERT INTO citas (paciente_id, fecha_cita, hora_cita, estado,
                                   fecha_creacion, medico_id, sede_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (cita_id, cita["paciente_id"], cita["fecha_cita"], cita["hora_cita"],
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (cita["paciente_id"], cita["fecha_cita"], cita["hora_cita"],
                   cita["estado"], cita["fecha_creacion"], cita["medico_id"], cita["sede_id"]))
+
+            cita_id = cursor.lastrowid
             total_citas += 1
 
             # Insertar recordatorio (80% probabilidad) - dejar que la BD auto-incremente recordatorio_id
@@ -408,11 +409,8 @@ def insert_citas_and_recordatorios(cursor, pacientes: List[Dict], reference_date
                       cita["estado_entrega"], cita["fecha_envio"], cita["respuesta_paciente"]))
                 total_recordatorios += 1
 
-            cita_id += 1
-
     print(f"Insertadas {total_citas} citas y {total_recordatorios} recordatorios")
     return total_citas, total_recordatorios
-
 
 def verify_data(cursor):
     """Verifica que los datos se insertaron correctamente"""
@@ -456,7 +454,6 @@ def verify_data(cursor):
     print(f"Tasa no-show promedio: {sum(no_show_rates)/len(no_show_rates):.2%}" if no_show_rates else "N/A")
     print(f"Rango tasas no-show: {min(no_show_rates):.2%} - {max(no_show_rates):.2%}" if no_show_rates else "N/A")
 
-
 def main():
     n_pacientes = int(sys.argv[1]) if len(sys.argv) > 1 else 300
 
@@ -479,7 +476,6 @@ def main():
     finally:
         cursor.close()
         conn.close()
-
 
 if __name__ == "__main__":
     main()

@@ -11,7 +11,7 @@
 
 **Sistema web para el control y la gestión inteligente de citas médicas.**
 
-[Descripción](#descripción) · [Funcionalidades](#funcionalidades) · [Instalación](#instalación) · [Uso](#uso) · [Estructura](#estructura-del-proyecto) · [ML No-Show Risk Score](#ml-no-show-risk-score-system) · [API](#api-disponible)
+[Descripción](#descripción) · [Funcionalidades](#funcionalidades) · [Instalación](#instalación) · [Ejecución con Docker](#ejecución-con-docker) · [Uso](#uso) · [Estructura](#estructura-del-proyecto) · [ML No-Show Risk Score](#ml-no-show-risk-score-system) · [API](#api-disponible)
 
 </div>
 
@@ -65,7 +65,7 @@ El proyecto combina un frontend web responsive con un servidor **Node.js + Expre
 ### Automatización y comunicación
 
 - Recordatorios de citas por WhatsApp mediante `whatsapp-web.js`.
-- **Envío dual WhatsApp+SMS para pacientes de alto riesgo** (basado en score ML).
+- **Priorización de recordatorios para pacientes de alto riesgo** basada en el score ML; con WhatsApp habilitado, el servidor puede registrar el canal combinado `WhatsApp+SMS`.
 - Ejecución periódica de recordatorios con `node-cron`.
 - Vinculación de un WhatsApp ya identificado con el número registrado del paciente mediante documento y últimos cuatro dígitos del teléfono.
 - El chatbot solo responde al número registrado del paciente que tiene la cita; los mensajes de números no asociados se ignoran.
@@ -148,38 +148,130 @@ ML_SERVICE_URL=http://localhost:8000
 
 > **Nota**: No subas `.env`, credenciales ni las carpetas de sesión de WhatsApp al repositorio.
 
-### 5. (Opcional) Servicio ML con Docker
+### 5. Ejecuta todo el proyecto con Docker (recomendado)
 
 ```bash
-cd ml-service
-cp .env.example .env
-# Edita .env con MYSQL_ROOT_PASSWORD=clinicita123
-docker-compose up -d
+cp .env.docker.example .env
+docker compose up -d --build
 ```
 
-Esto levanta:
-- **ml-service** en `http://localhost:8000` (API FastAPI)
-- **mlflow** en `http://localhost:5000` (UI de experimentos)
-- **mysql** en `localhost:3307` (BD dedicada para ML)
+> En Windows PowerShell, usa `Copy-Item .env.docker.example .env` en lugar de `cp`.
 
-### 6. Entrena el modelo (si usas Docker ML)
+El compose raíz levanta Node.js, FastAPI, MLflow y MySQL en una red interna. La base se inicializa automáticamente desde `database/bd.sql` la primera vez que se crea el volumen de MySQL.
+
+Genera los datos sintéticos y entrena el modelo dentro de los contenedores:
 
 ```bash
-docker run --rm --network clinicita-network \
-  -v clinicita_ml_models:/models \
-  -e MYSQL_ROOT_PASSWORD=clinicita123 \
-  -e MLFLOW_TRACKING_URI=http://mlflow:5000 \
-  -e DB_HOST=mysql \
-  clinicita-ml python train.py
+docker compose run --rm ml-service python scripts/generate_training_data.py 300
+docker compose run --rm ml-service python train.py
+docker compose restart ml-service
 ```
 
-### 7. Genera datos de entrenamiento (si usas Docker ML)
+Después del entrenamiento, comprueba que el modelo esté cargado:
 
 ```bash
-docker run --rm --network clinicita-network \
-  -e MYSQL_ROOT_PASSWORD=clinicita123 \
-  -e DB_HOST=mysql \
-  clinicita-ml python scripts/generate_training_data.py 300
+curl http://localhost:8000/health
+```
+
+La respuesta debe incluir `"model_loaded": true`.
+
+Servicios disponibles:
+
+- Aplicación: `http://localhost:3000`
+- Panel de pruebas: `http://localhost:3000/test-panel.html`
+- ML API: `http://localhost:8000`
+- MLflow: `http://localhost:5000`
+- MySQL: `localhost:3307`
+
+Para detener los servicios:
+
+```bash
+docker compose down
+```
+
+## Ejecución con Docker
+
+### Requisitos en otra máquina
+
+- Git.
+- Docker Desktop actualizado y en ejecución.
+- Al menos 4 GB de memoria asignada a Docker.
+- Puertos libres `3000`, `3307`, `5000` y `8000`.
+
+No es necesario instalar Node.js, Python, MySQL ni MLflow en el equipo anfitrión: todos se ejecutan dentro de Docker.
+
+### Primera ejecución
+
+Desde PowerShell:
+
+```powershell
+git clone <URL_DEL_REPOSITORIO>
+Set-Location ".\CLINICITA NODE.JS"
+Copy-Item .env.docker.example .env
+docker compose up -d --build
+docker compose run --rm ml-service python scripts/generate_training_data.py 300
+docker compose run --rm ml-service python train.py
+docker compose restart ml-service
+```
+
+Desde Linux, macOS o Git Bash:
+
+```bash
+git clone <URL_DEL_REPOSITORIO>
+cd "CLINICITA NODE.JS"
+cp .env.docker.example .env
+docker compose up -d --build
+docker compose run --rm ml-service python scripts/generate_training_data.py 300
+docker compose run --rm ml-service python train.py
+docker compose restart ml-service
+```
+
+Abre `http://localhost:3000`. Para probar los endpoints sin usar `curl`, abre `http://localhost:3000/test-panel.html`.
+
+### Operaciones habituales
+
+```bash
+# Ver estado de los servicios
+docker compose ps
+
+# Ver logs
+docker compose logs -f backend
+docker compose logs -f ml-service
+
+# Detener sin borrar datos
+docker compose down
+
+# Volver a iniciar los contenedores
+docker compose up -d
+
+# Reiniciar completamente la base, MLflow y el modelo
+docker compose down -v
+docker compose up -d --build
+```
+
+`docker compose down -v` elimina los volúmenes `mysql_data`, `mlflow_data` y `ml_models`; úsalo únicamente cuando quieras comenzar desde cero. Después de borrarlos debes ejecutar nuevamente el generador y el entrenamiento.
+
+### Configuración Docker
+
+Las variables se configuran en `.env`, creado a partir de `.env.docker.example`:
+
+| Variable | Uso | Valor habitual |
+| --- | --- | --- |
+| `MYSQL_ROOT_PASSWORD` | Contraseña de MySQL | `clinicita123` |
+| `TOKEN_SECRET` | Firma de tokens de sesión | Cambiar en producción |
+| `BACKEND_HOST_PORT` | Puerto del backend | `3000` |
+| `ML_HOST_PORT` | Puerto público del servicio ML | `8000` |
+| `MLFLOW_HOST_PORT` | Puerto público de MLflow | `5000` |
+| `MYSQL_HOST_PORT` | Puerto público de MySQL | `3307` |
+| `ENABLE_WHATSAPP` | Activa WhatsApp | `false` |
+| `GEMINI_API_KEY` | Clave opcional de Gemini | Vacía |
+
+El backend se conecta internamente a `http://ml-service:8000`; desde el navegador se usa `http://localhost:8000`. Por eso no se debe cambiar `ML_SERVICE_URL` a `localhost` dentro del contenedor backend.
+
+Para borrar también los datos persistidos y empezar desde cero:
+
+```bash
+docker compose down -v
 ```
 
 ## Uso
@@ -256,7 +348,7 @@ Estas cuentas son únicamente para desarrollo y demostración. Deben cambiarse o
 │   ├── conexion.js               # Conexión con MySQL
 │   ├── server.js                 # Servidor Express, autenticación, API + endpoints ML
 │   ├── servicios/
-│   │   └── whatsapp.js           # Recordatorios + chatbot + dual-channel (WhatsApp+SMS para alto riesgo)
+│   │   └── whatsapp.js           # Recordatorios, chatbot y priorización por riesgo
 │   └── services/
 │       └── ml-client.js          # Cliente HTTP para ML Service con fallback heurístico
 ├── .env                          # Variables locales, no versionar
@@ -275,7 +367,7 @@ La base de datos `clinicitabd` incluye las entidades principales del proceso de 
 - `citas`: fecha, hora, motivo y estado de la atención.
 - `horarios`: disponibilidad de médicos por sede y día de la semana (valida citas).
 - `lista_espera`: pacientes pendientes con especialidad y prioridad.
-- `recordatorios`: canal (WhatsApp, SMS, Email, WhatsApp+SMS), fecha y estado de entrega.
+- `recordatorios`: canal (`WhatsApp`, `SMS` o `Email`), fecha y estado de entrega.
 - `fichas_preconsulta`: síntomas registrados para una cita.
 - `paciente_riesgo_no_show`: **score ML (0-100), percentil, nivel (Crítico/Alto/Medio/Bajo), features JSON, versión modelo**.
 
@@ -335,8 +427,8 @@ Las rutas protegidas utilizan un token Bearer generado durante el inicio de sesi
 
 1. **Generación masiva de datos sintéticos** (`ml-service/scripts/generate_training_data.py`)
    - 300 pacientes nuevos con perfiles de riesgo realistas: Alto (25%), Medio (45%), Bajo (30%)
-   - 1,546 citas distribuidas en 365 días respetando horarios médicos válidos
-   - 1,259 recordatorios con canales variados (WhatsApp, SMS, Email, WhatsApp+SMS)
+   - El generador crea hasta 1,546 citas distribuidas en 365 días respetando horarios médicos válidos; la cantidad final depende de los cupos disponibles.
+   - Los recordatorios usan únicamente los canales compatibles con el esquema (`WhatsApp`, `SMS` y `Email`).
    - Campos obligatorios completados: `nombre_completo`, `documento_id`, `telefono_whatsapp`
 
 2. **Modelo XGBoost reentrenado con AUC = 1.0**
@@ -350,10 +442,10 @@ Las rutas protegidas utilizan un token Bearer generado durante el inicio de sesi
    - FastAPI: 5 endpoints para inferencia, entrenamiento y recálculo masivo
    - Cliente ML con fallback heurístico si el servicio no está disponible
 
-4. **Integración WhatsApp dual-channel**
-   - Pacientes **Alto/Crítico** reciben WhatsApp + SMS simulado
-   - Canal `WhatsApp+SMS` agregado a enum `recordatorios.canal_envio`
-   - Estado `Leido` agregado a enum `recordatorios.estado_entrega`
+4. **Integración de recordatorios**
+   - Pacientes **Alto/Crítico** pueden priorizarse para recordatorios según su score.
+   - Los canales persistidos por el esquema son `WhatsApp`, `SMS` y `Email`.
+   - Los estados de entrega válidos son `Pendiente`, `Enviado`, `Entregado` y `Fallido`.
 
 5. **Frontend con coloreo de riesgo**
    - Mapeo visual: Crítico (rojo), Alto (naranja), Medio (amarillo), Bajo (verde)
@@ -362,17 +454,36 @@ Las rutas protegidas utilizan un token Bearer generado durante el inicio de sesi
 
 #### 🔧 Correcciones y Refactorizaciones
 
-- **Encoding pymysql**: Cambiado enum `nivel_riesgo` de `'Crítico'` a `'Critico'` (sin tilde) para evitar "Data truncation"
+- **Compatibilidad MySQL**: El predictor usa el nivel `Crítico`, compatible con el enum definido en `database/bd.sql`.
 - **Horarios médicos**: 84 entradas en tabla `horarios` cubriendo 4 médicos × 3 sedes × 7 días
 - **Validación de citas**: Trigger `trg_validar_horario_cita` ahora tiene horarios válidos para todos los casos
 - **Data generation**: Reescrita para consultar horarios válidos antes de crear citas (evita errores de trigger)
-- **ML_SERVICE_URL**: Unificado a `http://localhost:8000` en `.env`, `server.js`, `ml-client.js`
-- **Docker networking**: Puerto ML service expuesto en 8000 (era 8001 en docker-compose)
+- **ML_SERVICE_URL**: El backend usa `http://ml-service:8000` dentro de Docker y el navegador usa `http://localhost:8000`.
+- **Docker networking**: Puerto ML público `8000`; backend `3000`, MLflow `5000` y MySQL `3307`.
+- **Generador oficial**: Usa IDs autoincrementales y solo canales/estados de entrega permitidos por el esquema actual.
+- **Panel de pruebas**: `public/test-panel.html` permite probar autenticación, endpoints Node.js y ML sin usar `curl`.
 
 #### 📦 Dependencias Agregadas
 
-**Node.js** (`package.json`): `axios` (ya presente)
+**Node.js** (`package.json`): `eslint` y `prettier` como dependencias de desarrollo; el lockfile quedó actualizado.
 **Python** (`ml-service/requirements.txt`): `fastapi`, `uvicorn`, `xgboost`, `mlflow`, `pymysql`, `pandas`, `scikit-learn`, `joblib`, `pydantic`, `pydantic-settings`
+
+### Scripts de comprobación local
+
+Los siguientes comandos están definidos en `package.json`:
+
+```bash
+npm run lint          # ESLint para el código JavaScript
+npm run format        # Formatea la configuración de calidad
+npm run format:check  # Comprueba el formato
+npm run check:node    # Verifica sintaxis Node.js
+npm run check:python  # Verifica sintaxis Python
+npm test              # Sintaxis y smoke test del backend
+npm run build         # Valida Compose y construye imágenes Docker
+npm run check         # Ejecuta toda la suite anterior
+```
+
+La suite recomendada antes de un commit es `npm run check`.
 
 ---
 
@@ -469,7 +580,7 @@ curl http://localhost:8000/riesgo/1
   "paciente_id": 1,
   "score": 85.50,
   "percentil": 85,
-  "nivel_riesgo": "Critico",
+  "nivel_riesgo": "Crítico",
   "features_principales": {
     "citas_no_show": 5,
     "no_show_ultimos_90d": 2,
@@ -552,13 +663,13 @@ curl -X POST http://localhost:3000/api/pacientes/riesgo/recalcular-todos \
 
 5. Repetir para médico: [http://localhost:3000/roles/medico/agenda.html](http://localhost:3000/roles/medico/agenda.html)
 
-#### 8. Verificar WhatsApp Dual-Channel (Alto Riesgo)
+#### 8. Verificar recordatorios priorizados por riesgo
 
 1. Configurar `ENABLE_WHATSAPP=true` en `.env`
 2. Reiniciar servidor Node.js
 3. Escanear QR de WhatsApp Web
 4. Trigger recordatorios (esperar cron o llamar endpoint interno)
-5. Verificar en logs: `canal_envio: "WhatsApp+SMS"` para pacientes Crítico/Alto
+5. Verificar en logs y en la base de datos el canal registrado para pacientes Crítico/Alto. Si la migración automática del servidor está activa, puede aparecer `WhatsApp+SMS`.
 6. Verificar en BD:
    ```sql
    SELECT canal_envio, estado_entrega, COUNT(*) 
@@ -577,13 +688,13 @@ SELECT
   MAX(pr.score) as max_score
 FROM paciente_riesgo_no_show pr
 GROUP BY pr.nivel_riesgo
-ORDER BY FIELD(pr.nivel_riesgo, 'Critico', 'Alto', 'Medio', 'Bajo');
+ORDER BY FIELD(pr.nivel_riesgo, 'Crítico', 'Alto', 'Medio', 'Bajo');
 ```
 
 **Resultado esperado aprox:**
 | nivel_riesgo | total | score_promedio | min_score | max_score |
 |--------------|-------|----------------|-----------|-----------|
-| Critico      | 72    | ~85            | 70        | 98        |
+| Crítico      | 72    | ~85            | 70        | 98        |
 | Alto         | 0     | -              | -         | -         |
 | Medio        | 0     | -              | -         | -         |
 | Bajo         | 236   | ~10            | 2         | 29        |

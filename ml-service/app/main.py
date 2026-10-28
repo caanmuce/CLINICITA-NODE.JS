@@ -1,5 +1,6 @@
 """API FastAPI para servicio de riesgo no-show"""
 from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from typing import List, Optional
 import os
@@ -54,6 +55,14 @@ app = FastAPI(
     description="API para predicción de riesgo de inasistencia de pacientes",
     version="1.0.0",
     lifespan=lifespan
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

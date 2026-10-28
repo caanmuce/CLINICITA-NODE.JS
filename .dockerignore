@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.venv
+node_modules
+ml-service/.venv
+ml-service/mlruns
+ml-service/feature_importance.csv
+**/__pycache__
+**/*.pyc
+*.log
+.wwebjs_auth
+.wwebjs_cache
+debug.log
+server.log
+docker-compose

@@ -37,7 +37,7 @@ class ModelPredictor:
 
         # Nivel de riesgo
         if score >= 70:
-            nivel = "Critico"
+            nivel = "Crítico"
         elif score >= 50:
             nivel = "Alto"
         elif score >= 30:
