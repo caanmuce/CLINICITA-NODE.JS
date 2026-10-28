@@ -1,6 +1,7 @@
 const cron = require("node-cron");
 const fs = require("node:fs");
 const path = require("node:path");
+const { mlClient } = require("../services/ml-client");
 const conversaciones = new Map();
 const CONVERSACION_TTL_MS = Number(process.env.WHATSAPP_CONVERSATION_TTL_MS) || 4 * 60 * 60 * 1000;
 const CLINIC_TIMEZONE = process.env.CLINIC_TIMEZONE || "America/Bogota";
@@ -493,6 +494,45 @@ async function procesarMensaje({ client, msg, consulta, query, clasificar, respo
     }
 }
 
+// ============================================================
+// 1.6.1 INTEGRACIÓN RIESGO NO-SHOW EN RECORDATORIOS
+// ============================================================
+
+/**
+ * Envía SMS simulado (para pacientes de alto riesgo)
+ * En producción, aquí se integraría un proveedor real de SMS (Twilio, Vonage, etc.)
+ */
+async function enviarSMS({ pacienteId, citaId, telefono, mensaje }) {
+    try {
+        // En desarrollo, solo logueamos el SMS simulado
+        console.log(`[SMS SIMULADO] Para ${telefono} (paciente ${pacienteId}, cita ${citaId}): ${mensaje}`);
+
+        // Aquí iría la integración real con un proveedor de SMS:
+        // const resp = await axios.post('https://api.proveedor-sms.com/send', {
+        //     to: telefono,
+        //     body: mensaje
+        // });
+
+        return true;
+    } catch (error) {
+        console.warn(`[SMS] Error enviando SMS simulado a ${telefono}: ${error.message}`);
+        return false;
+    }
+}
+
+/**
+ * Obtiene el nivel de riesgo del paciente, con fallback heurístico si ML no está disponible
+ */
+async function obtenerNivelRiesgo(pacienteId) {
+    try {
+        const riesgo = await mlClient.getRiesgo(pacienteId);
+        return riesgo.nivel_riesgo;
+    } catch (error) {
+        console.warn(`[Riesgo] No se pudo obtener riesgo para paciente ${pacienteId}: ${error.message}`);
+        return "Bajo"; // Default conservador
+    }
+}
+
 async function enviarRecordatorios({ client, query }) {
     const citas = await query(`
         SELECT c.cita_id,
@@ -516,17 +556,38 @@ async function enviarRecordatorios({ client, query }) {
             continue;
         }
         const fecha = fechaCitaActual.toLocaleString("es-CO", { timeZone: CLINIC_TIMEZONE, dateStyle: "medium", timeStyle: "short" });
-        const enviado = await enviarWhatsApp(client, query, {
+        const mensajeBase = `Hola ${cita.paciente}. Te recordamos tu cita médica el ${fecha}. Responde CONFIRMAR o CANCELAR.`;
+
+        // 1.6.1: Consultar nivel de riesgo del paciente
+        const nivelRiesgo = await obtenerNivelRiesgo(cita.paciente_id);
+        const esAltoRiesgo = nivelRiesgo === "Alto" || nivelRiesgo === "Crítico";
+
+        // Canal 1: WhatsApp (siempre)
+        const enviadoWhatsApp = await enviarWhatsApp(client, query, {
             pacienteId: cita.paciente_id,
             citaId: cita.cita_id,
             telefono,
-            mensaje: `Hola ${cita.paciente}. Te recordamos tu cita médica el ${fecha}. Responde CONFIRMAR o CANCELAR.`
+            mensaje: mensajeBase
         });
 
-        if (!enviado) {
-            // Antes: se ignoraba el fallo con "continue" y el registro
-            // se quedaba en "Pendiente" para siempre, sin dejar rastro
-            // de que se intentó enviar y falló.
+        // Canal 2: SMS simulado (solo para alto riesgo)
+        let enviadoSMS = true;
+        if (esAltoRiesgo) {
+            const mensajeSMS = `[ALTO RIESGO] ${mensajeBase} Prioridad: ${nivelRiesgo}.`;
+            enviadoSMS = await enviarSMS({
+                pacienteId: cita.paciente_id,
+                citaId: cita.cita_id,
+                telefono,
+                mensaje: mensajeSMS
+            });
+            console.log(`[Recordatorio] Paciente ${cita.paciente} (${cita.paciente_id}) - Riesgo: ${nivelRiesgo} - Doble canal: WhatsApp + SMS`);
+        } else {
+            console.log(`[Recordatorio] Paciente ${cita.paciente} (${cita.paciente_id}) - Riesgo: ${nivelRiesgo} - Canal único: WhatsApp`);
+        }
+
+        const exitoGeneral = enviadoWhatsApp && enviadoSMS;
+
+        if (!exitoGeneral) {
             await asegurarRecordatorio(query, cita.cita_id);
             await query("UPDATE recordatorios SET fecha_envio = NOW(), estado_entrega = 'Fallido' WHERE cita_id = ?", [cita.cita_id]);
             continue;
@@ -534,7 +595,10 @@ async function enviarRecordatorios({ client, query }) {
 
         await query("UPDATE citas SET recordatorio_enviado = 1 WHERE cita_id = ?", [cita.cita_id]);
         await asegurarRecordatorio(query, cita.cita_id);
-        await query("UPDATE recordatorios SET fecha_envio = NOW(), estado_entrega = 'Enviado' WHERE cita_id = ?", [cita.cita_id]);
+
+        // Registrar ambos canales en la tabla recordatorios
+        const canalEnvio = esAltoRiesgo ? "WhatsApp+SMS" : "WhatsApp";
+        await query("UPDATE recordatorios SET fecha_envio = NOW(), estado_entrega = 'Enviado', canal_envio = ? WHERE cita_id = ?", [canalEnvio, cita.cita_id]);
     }
 }
 

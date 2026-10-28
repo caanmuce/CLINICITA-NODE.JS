@@ -1,0 +1,45 @@
+services:
+  ml-service:
+    build: .
+    container_name: clinicita-ml
+    ports:
+      - "8001:8000"
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - DB_NAME=clinicitabd
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    depends_on:
+      - mysql
+      - mlflow
+    volumes:
+      - .:/app
+      - ml_models:/models
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.12.1
+    container_name: clinicita-mlflow
+    ports:
+      - "5000:5000"
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlflow.db --default-artifact-root /mlflow/artifacts
+    volumes:
+      - mlflow_data:/mlflow
+
+  mysql:
+    image: mysql:8.0
+    container_name: clinicita-mysql-ml
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=clinicitabd
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_ml_data:/var/lib/mysql
+      - ../database/bd.sql:/docker-entrypoint-initdb.d/bd.sql
+
+volumes:
+  ml_models:
+  mlflow_data:
+  mysql_ml_data:
