@@ -274,6 +274,95 @@
       </section>
     </div>
 
+       <section class="card service-card overflow-hidden mt-6">
+      <div class="svc-top" style="background: var(--blue)"></div>
+      <div class="p-5 sm:p-6">
+        <div class="section-title">
+          <div>
+            <h2 class="font-display text-xl font-semibold">Recepción y paciente</h2>
+            <p class="mt-1 font-mono text-xs" style="color: var(--blue)">Endpoints nuevos · inicia sesión sola con el rol que toque</p>
+          </div>
+          <span class="shrink-0 rounded-full px-2.5 py-1 text-xs font-medium" style="background: var(--blue-soft); color: var(--blue)">requiere JWT</span>
+        </div>
+ 
+        <div class="service-grid">
+ 
+          <!-- ============ RECEPCIONISTA ============ -->
+          <div class="form-stack">
+            <h3 class="font-display text-base font-semibold" style="color: var(--blue)">Recepcionista</h3>
+ 
+            <button data-api="rec-citas" class="action-btn btn btn-nd-solid w-full">Ver citas (¿trae paciente_id?)</button>
+ 
+            <div class="step">
+              <label for="recQ" class="muted mb-2 block text-sm">Buscar paciente (nombre o documento)</label>
+              <input id="recQ" value="Juan" class="field mb-2">
+              <button data-api="rec-pacientes" class="action-btn btn btn-nd w-full">GET /api/pacientes?q=</button>
+            </div>
+ 
+            <div class="step">
+              <label class="muted mb-2 block text-sm">Agendar a nombre de un paciente</label>
+              <input id="recPacienteId" type="number" min="1" value="1" class="field mb-2" aria-label="ID del paciente" placeholder="paciente_id">
+              <input id="recMedico" type="number" min="1" value="1" class="field mb-2" aria-label="ID del médico" placeholder="medico_id">
+              <input id="recFecha" type="date" class="field mb-2" aria-label="Fecha">
+              <input id="recHora" type="time" value="09:00" class="field mb-2" aria-label="Hora">
+              <input id="recMotivo" value="Cita de prueba" class="field mb-2" aria-label="Motivo" placeholder="motivo (opcional)">
+              <button data-api="rec-horarios" class="action-btn btn btn-nd w-full mb-2">Ver horas libres (médico + fecha)</button>
+              <button data-api="rec-agendar" class="action-btn btn btn-nd-solid w-full">POST /api/citas/admin</button>
+            </div>
+ 
+            <div class="step">
+              <label for="recEstadoRec" class="muted mb-2 block text-sm">Recordatorios</label>
+              <select id="recEstadoRec" class="field mb-2">
+                <option value="">Todos los estados</option>
+                <option value="Pendiente">Pendiente</option>
+                <option value="Enviado">Enviado</option>
+                <option value="Entregado">Entregado</option>
+                <option value="Fallido">Fallido</option>
+              </select>
+              <button data-api="rec-recordatorios" class="action-btn btn btn-nd w-full mb-2">GET /api/recordatorios</button>
+              <input id="recCitaId" type="number" min="1" value="1" class="field mb-2" aria-label="ID de la cita" placeholder="cita_id">
+              <button data-api="rec-reenviar" class="action-btn btn btn-warn w-full">Reenviar recordatorio de esa cita</button>
+            </div>
+ 
+            <div class="step">
+              <button data-api="rec-espera" class="action-btn btn btn-nd w-full">Ver lista de espera activa</button>
+            </div>
+          </div>
+ 
+          <!-- ============ PACIENTE ============ -->
+          <div class="form-stack">
+            <h3 class="font-display text-base font-semibold" style="color: var(--plum)">Paciente</h3>
+ 
+            <button data-api="pac-citas" class="action-btn btn btn-nd-solid w-full">Mis citas (para ver los IDs)</button>
+ 
+            <div class="step">
+              <label class="muted mb-2 block text-sm">Mi lista de espera</label>
+              <button data-api="pac-espera" class="action-btn btn btn-nd w-full mb-2">GET /api/lista-espera/me</button>
+              <button data-api="pac-espera-count" class="action-btn btn btn-nd w-full">GET /api/lista-espera/me/count</button>
+            </div>
+ 
+            <div class="step">
+              <label for="pacEspecialidad" class="muted mb-2 block text-sm">Inscribirme a una especialidad</label>
+              <input id="pacEspecialidad" value="Cardiología" class="field mb-2">
+              <button data-api="pac-espera-inscribir" class="action-btn btn btn-nd w-full">POST /api/lista-espera/me</button>
+            </div>
+ 
+            <div class="step">
+              <label for="pacCitaId" class="muted mb-2 block text-sm">Confirmar una cita</label>
+              <input id="pacCitaId" type="number" min="1" value="1" class="field mb-2" aria-label="ID de la cita">
+              <button data-api="pac-confirmar" class="action-btn btn btn-nd w-full">PUT /api/citas/:id/confirmar</button>
+            </div>
+ 
+            <div class="step">
+              <button data-api="pac-clave" class="action-btn btn btn-warn w-full">Cambiar clave (ida y vuelta)</button>
+              <p class="muted mt-3 text-xs">Prueba una clave incorrecta, cambia la clave a una temporal y la devuelve a la original. Gasta 3 peticiones del límite de /auth. Sirve con cualquier rol que tengas en sesión.</p>
+            </div>
+          </div>
+ 
+        </div>
+      </div>
+    </section>
+
     <section class="console mt-6">
       <div class="console-bar flex flex-wrap items-center justify-between gap-3 px-5 py-4">
         <div class="min-w-0">
@@ -419,6 +508,126 @@
       $("requestMeta").textContent = "Esperando una solicitud...";
       $("output").textContent = "// Las respuestas JSON aparecerán aquí.";
     });
+
+        // ====== Pruebas de recepción y paciente ======
+    const num = (id) => Number($(id).value);
+ 
+    // request() ya muestra los errores de red en la consola del panel; esta marca evita pisarlos.
+    const apiCall = (url, options) => request(url, options).catch((error) => { error.mostrado = true; throw error; });
+ 
+    // Si la sesión actual no es del rol que pide la prueba, entra sola con la cuenta demo de ese rol.
+    async function ensureRole(kind) {
+      if (session?.usuario?.rol === credentials[kind].rol) return;
+      await login(kind).catch((error) => { error.mostrado = true; throw error; });
+    }
+ 
+    const jsonHeaders = () => ({ ...authHeaders(), "Content-Type": "application/json" });
+ 
+    // Los horarios de ejemplo cubren lunes a viernes: se propone el próximo lunes.
+    function proximoLunes() {
+      const d = new Date();
+      d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7));
+      return d.toLocaleDateString("sv-SE"); // AAAA-MM-DD en hora local
+    }
+ 
+    async function runApiAction(action) {
+      const API = `${NODE_BASE}/api`;
+      switch (action) {
+        // ---------- Recepcionista ----------
+        case "rec-citas":
+          await ensureRole("receptionist");
+          return apiCall(`${API}/citas/admin?limit=10`, { headers: authHeaders() });
+        case "rec-pacientes":
+          await ensureRole("receptionist");
+          return apiCall(`${API}/pacientes?q=${encodeURIComponent($("recQ").value.trim())}`, { headers: authHeaders() });
+        case "rec-horarios":
+          await ensureRole("receptionist");
+          return apiCall(`${API}/horarios?medico=${num("recMedico")}&fecha=${$("recFecha").value}`, { headers: authHeaders() });
+        case "rec-agendar": {
+          await ensureRole("receptionist");
+          const body = {
+            paciente_id: num("recPacienteId"),
+            medico_id: num("recMedico"),
+            fecha: $("recFecha").value,
+            hora: $("recHora").value
+          };
+          if ($("recMotivo").value.trim()) body.motivo = $("recMotivo").value.trim();
+          return apiCall(`${API}/citas/admin`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify(body) });
+        }
+        case "rec-recordatorios": {
+          await ensureRole("receptionist");
+          const params = new URLSearchParams({ limit: "10" });
+          if ($("recEstadoRec").value) params.set("estado", $("recEstadoRec").value);
+          return apiCall(`${API}/recordatorios?${params}`, { headers: authHeaders() });
+        }
+        case "rec-reenviar":
+          await ensureRole("receptionist");
+          return apiCall(`${API}/recordatorios/${num("recCitaId")}/reenviar`, { method: "POST", headers: authHeaders() });
+        case "rec-espera":
+          await ensureRole("receptionist");
+          return apiCall(`${API}/lista-espera?estado=Activo`, { headers: authHeaders() });
+ 
+        // ---------- Paciente ----------
+        case "pac-citas":
+          await ensureRole("patient");
+          return apiCall(`${API}/citas`, { headers: authHeaders() });
+        case "pac-espera":
+          await ensureRole("patient");
+          return apiCall(`${API}/lista-espera/me`, { headers: authHeaders() });
+        case "pac-espera-count":
+          await ensureRole("patient");
+          return apiCall(`${API}/lista-espera/me/count`, { headers: authHeaders() });
+        case "pac-espera-inscribir":
+          await ensureRole("patient");
+          return apiCall(`${API}/lista-espera/me`, {
+            method: "POST", headers: jsonHeaders(),
+            body: JSON.stringify({ especialidad_requerida: $("pacEspecialidad").value.trim() })
+          });
+        case "pac-confirmar":
+          await ensureRole("patient");
+          return apiCall(`${API}/citas/${num("pacCitaId")}/confirmar`, { method: "PUT", headers: authHeaders() });
+ 
+        // ---------- Cualquier rol: cambiar clave (ida y vuelta) ----------
+        case "pac-clave": {
+          if (!session?.token) throw new Error("Inicia sesión primero (sirve cualquier rol).");
+          const cuenta = Object.values(credentials).find((c) => c.rol === session.usuario?.rol);
+          if (!cuenta) throw new Error("No tengo la clave de demostración de este rol.");
+ 
+          const temporal = "Temporal-123456";
+          const url = `${API}/auth/cambiar-clave`;
+          const put = (clave_actual, nueva_clave) => apiCall(url, {
+            method: "PUT", headers: jsonHeaders(), body: JSON.stringify({ clave_actual, nueva_clave })
+          });
+ 
+          const incorrecta = await put("clave-incorrecta", temporal);
+          const cambio = await put(cuenta.clave, temporal);
+          let vuelta = null;
+          try { vuelta = await put(temporal, cuenta.clave); } catch { /* se avisa abajo */ }
+ 
+          const resumen = (r) => (r ? { status: r.response.status, ...r.data } : { error: "sin respuesta" });
+          const data = {
+            "1) clave actual incorrecta (esperado 400)": resumen(incorrecta),
+            "2) cambio a clave temporal (esperado 200)": resumen(cambio),
+            "3) vuelta a la clave original (esperado 200)": resumen(vuelta)
+          };
+          if (cambio.response.status === 200 && vuelta?.response.status !== 200) {
+            data.AVISO = `La clave de esta cuenta quedó como "${temporal}". Devuélvela a mano para que los accesos rápidos sigan funcionando.`;
+          }
+          return showOutput({ status: vuelta?.response.status ?? 0, duration: 0, method: "PUT", url, data });
+        }
+      }
+    }
+ 
+    document.querySelectorAll("[data-api]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        try { await runApiAction(button.dataset.api); }
+        catch (error) {
+          if (!error.mostrado) showOutput({ status: 0, duration: 0, method: "LOCAL", url: button.dataset.api, data: { error: error.message } });
+        }
+      });
+    });
+ 
+    $("recFecha").value = proximoLunes();
     renderSession();
   </script>
 </body>
