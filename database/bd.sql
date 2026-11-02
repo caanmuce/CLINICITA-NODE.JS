@@ -5,7 +5,7 @@ DROP DATABASE IF EXISTS clinicitabd;
 
 CREATE DATABASE clinicitabd CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 USE clinicitabd;
-
+  SELECT usuario_id, correo, rol, activo FROM usuarios;
 -- --------------------------------------------------------
 -- Tabla `sedes`
 -- --------------------------------------------------------
@@ -473,6 +473,7 @@ INSERT INTO pacientes (nombre_completo, documento_id, telefono_whatsapp, correo_
 
 -- Horarios de ejemplo (Lunes a Viernes 8:00-12:00 y 14:00-17:00, slots de 30 min)
 -- Dra. Laura Gómez (medico_id=1) - Sede Principal (sede_id=1)
+
 INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, duracion_slot, activo) VALUES
 (1, 1, 1, '08:00:00', '12:00:00', 30, 1), -- Lunes mañana
 (1, 1, 1, '14:00:00', '17:00:00', 30, 1), -- Lunes tarde
