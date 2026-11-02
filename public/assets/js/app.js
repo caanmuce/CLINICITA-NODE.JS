@@ -185,7 +185,6 @@ document.addEventListener("submit", (evento) => {
                 .catch((error) => mostrarAlerta(error.message, "danger"));
             break;
         }
-            break;
         case "perfil":
             mostrarAlerta("Actualización de perfil lista para conectar con el backend.", "warning");
             break;
@@ -210,10 +209,11 @@ document.addEventListener("DOMContentLoaded", () => {
     // El orden importa: pintarSesion() crea el botón de logout en el navbar
     // y configurarLogout() lo busca para conectarle el clic, así que tiene
     // que ir después.
-    if (!document.getElementById("tabla-espera")) return;
-    llenarEspecialidadesListaEspera();
+    if (document.getElementById("tabla-espera")) {
+        llenarEspecialidadesListaEspera();
+        cargarListaEspera();
+    }
 
-    cargarListaEspera();
     pintarSesion();
     configurarLogout();
 
@@ -277,6 +277,7 @@ document.addEventListener("DOMContentLoaded", () => {
         cargarAgendaMedico();
         window.setInterval(cargarAgendaMedico, 15000);
     }
+
 });
 
 async function cargarFormularioCita() {

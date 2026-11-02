@@ -6,6 +6,7 @@ const conexion = require("./conexion");
 const crypto = require("crypto");
 const { promisify } = require("util");
 const { iniciarWhatsApp } = require("./servicios/whatsapp");
+const { reasignarCupoListaEspera } = require("./servicios/espera");
 const { z } = require("zod");
 const helmet = require("helmet");
 const cors = require("cors");
@@ -171,6 +172,36 @@ async function initializeAuth() {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
     await query("ALTER TABLE usuarios MODIFY clave_hash VARCHAR(200) NOT NULL");
+    const tarifaMedico = await query(
+        `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'medicos' AND COLUMN_NAME = 'tarifa'`
+    );
+    if (!tarifaMedico.length) {
+        await query("ALTER TABLE medicos ADD COLUMN tarifa DECIMAL(10,2) NOT NULL DEFAULT 50000.00 AFTER especialidad");
+        console.log("Migración aplicada: se agregó medicos.tarifa");
+    }
+    const reparacionesTexto = [
+        ["E2949CC2A1", "C3AD"],
+        ["E2949CC2AE", "C3A9"],
+        ["E2949CE29482", "C3B3"],
+        ["E2949CC2BA", "C3BA"],
+        ["E2949CC2B1", "C3B1"]
+    ];
+    for (const [textoDanado, textoCorrecto] of reparacionesTexto) {
+        const reemplazos = [
+            ["medicos", "nombre_completo"],
+            ["medicos", "especialidad"],
+            ["pacientes", "nombre_completo"],
+            ["lista_espera", "especialidad_requerida"]
+        ];
+        for (const [tabla, columna] of reemplazos) {
+            await query(
+                `UPDATE ${tabla}
+                 SET ${columna} = REPLACE(${columna}, CONVERT(0x${textoDanado} USING utf8mb4), CONVERT(0x${textoCorrecto} USING utf8mb4))
+                 WHERE ${columna} LIKE CONCAT('%', CONVERT(0x${textoDanado} USING utf8mb4), '%')`
+            );
+        }
+    }
     const lidPaciente = await query(
         `SELECT COLUMN_NAME FROM information_schema.COLUMNS
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pacientes' AND COLUMN_NAME = 'whatsapp_lid'`
@@ -513,17 +544,22 @@ app.get("/api/citas", requireAuth, requireRole("paciente"), async (req, res) => 
 
 
 app.delete("/api/citas/:id", requireAuth, requireRole("paciente"), async (req, res) => {
-    const users = await query("SELECT paciente_id FROM usuarios WHERE usuario_id = ? AND rol = 'paciente' AND activo = 1", [req.user.id]); 
-    const pacienteId = users[0]?.paciente_id;
-    if (!pacienteId) return res.status(400).json({ mensaje: "El usuario no está asociado a un paciente" });
-    // Verifica que la cita sea del paciente que hace la petición,
-    // para que nadie pueda cancelar citas ajenas cambiando el id en la URL.
-    const citaId = await query("SELECT cita_id FROM citas WHERE cita_id = ? AND paciente_id = ?", [req.params.id, pacienteId]);
-    if (!citaId.length) return res.status(404).json({ mensaje: "Cita no encontrada o no pertenece al paciente" });
+    try {
+        const users = await query("SELECT paciente_id FROM usuarios WHERE usuario_id = ? AND rol = 'paciente' AND activo = 1", [req.user.id]); 
+        const pacienteId = users[0]?.paciente_id;
+        if (!pacienteId) return res.status(400).json({ mensaje: "El usuario no está asociado a un paciente" });
+        
+        const citaInfo = await query("SELECT cita_id, medico_id, fecha_cita, hora_cita FROM citas WHERE cita_id = ? AND paciente_id = ?", [req.params.id, pacienteId]);
+        if (!citaInfo.length) return res.status(404).json({ mensaje: "Cita no encontrada o no pertenece al paciente" });
 
-    await query("UPDATE citas SET estado = 'Cancelada' WHERE cita_id = ?", [req.params.id]);
-    res.json({ mensaje: "Cita cancelada correctamente" });
-})
+        await query("UPDATE citas SET estado = 'Cancelada' WHERE cita_id = ?", [req.params.id]);
+        await reasignarCupoListaEspera(query, citaInfo[0]);
+        res.json({ mensaje: "Cita cancelada correctamente" });
+    } catch (error) {
+        console.error("Error cancelando cita:", error.message);
+        res.status(500).json({ mensaje: "No fue posible cancelar la cita" });
+    }
+});
 
 /**
  * Cuenta las citas del paciente autenticado que tengan un estado
@@ -787,6 +823,53 @@ app.get("/api/reportes/resumen", requireAuth, requireRole("administrador"), asyn
     } catch (error) {
         console.error("Error en reporte resumen:", error.message);
         res.status(500).json({ mensaje: "No fue posible obtener el resumen" });
+    }
+});
+
+app.get("/api/reportes/ausentismo", requireAuth, requireRole("administrador"), async (req, res) => {
+    try {
+        const { desde, hasta } = req.query;
+        let where = "WHERE 1=1";
+        const filtros = [];
+        if (desde) { where += " AND c.fecha_cita >= ?"; filtros.push(desde); }
+        if (hasta) { where += " AND c.fecha_cita <= ?"; filtros.push(hasta); }
+
+        const resumen = await query(`
+            SELECT 
+                m.especialidad,
+                COUNT(c.cita_id) AS programadas,
+                SUM(CASE WHEN c.estado = 'Completada' THEN 1 ELSE 0 END) AS atendidas,
+                SUM(CASE WHEN c.estado = 'Cancelada' THEN 1 ELSE 0 END) AS canceladas,
+                SUM(CASE WHEN c.estado = 'No-Asistio' THEN 1 ELSE 0 END) AS inasistencias,
+                SUM(CASE WHEN c.estado = 'No-Asistio' THEN m.tarifa ELSE 0 END) AS impacto_economico
+            FROM citas c
+            JOIN medicos m ON m.medico_id = c.medico_id
+            ${where}
+            GROUP BY m.especialidad
+            ORDER BY inasistencias DESC
+        `, filtros);
+
+        const totales = resumen.reduce((acc, curr) => {
+            acc.programadas += Number(curr.programadas);
+            acc.atendidas += Number(curr.atendidas);
+            acc.canceladas += Number(curr.canceladas);
+            acc.inasistencias += Number(curr.inasistencias);
+            acc.impacto_economico += Number(curr.impacto_economico);
+            return acc;
+        }, { programadas: 0, atendidas: 0, canceladas: 0, inasistencias: 0, impacto_economico: 0 });
+
+        const tasaAusentismo = totales.programadas > 0 ? Math.round((totales.inasistencias / totales.programadas) * 100) : 0;
+
+        res.json({
+            totales: {
+                ...totales,
+                tasa_ausentismo: `${tasaAusentismo}%`
+            },
+            detalle: resumen
+        });
+    } catch (error) {
+        console.error("Error en reporte de ausentismo:", error.message);
+        res.status(500).json({ mensaje: "No fue posible obtener el reporte de ausentismo" });
     }
 });
 
@@ -1117,6 +1200,9 @@ app.put("/api/citas/:id/reprogramar", requireAuth, requireRole("paciente"), vali
         // Resetear recordatorio
         await query("UPDATE citas SET recordatorio_enviado = 0 WHERE cita_id = ?", [id]);
         await query("UPDATE recordatorios SET estado_entrega = 'Pendiente', fecha_envio = NULL WHERE cita_id = ?", [id]);
+
+        // Liberar el horario anterior reasignando a lista de espera
+        await reasignarCupoListaEspera(query, cita[0]);
 
         res.json({ mensaje: "Cita reprogramada correctamente" });
     } catch (error) {
