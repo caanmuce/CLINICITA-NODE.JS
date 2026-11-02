@@ -281,7 +281,7 @@ const authLimiter = rateLimit({
 
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 100, // máximo 100 requests por IP
+    max: Number(process.env.API_RATE_LIMIT_MAX || 1000), // por IP cada 15 min
     standardHeaders: true,
     legacyHeaders: false
 });
@@ -452,6 +452,23 @@ app.get("/api/horarios", requireAuth, requireRole("paciente", "recepcionista", "
     }
 });
 
+// Devuelve la franja de atención (con su sede) que cubre esa hora, o null si el médico no atiende.
+// Es la misma regla que ya usa POST /api/citas/admin: dentro de una franja activa y alineada al slot.
+async function franjaDelMedico(medicoId, fecha, hora, sedeId = null) {
+    const horaSQL = `${hora}:00`;
+    const franjas = await query(
+        `SELECT sede_id FROM horarios
+         WHERE medico_id = ? AND activo = 1
+           AND dia_semana = DAYOFWEEK(?) - 1
+           AND ? >= hora_inicio AND ? < hora_fin
+           AND MOD(TIME_TO_SEC(TIMEDIFF(?, hora_inicio)), duracion_slot * 60) = 0
+           AND (? IS NULL OR sede_id = ?)
+         LIMIT 1`,
+        [medicoId, fecha, horaSQL, horaSQL, horaSQL, sedeId, sedeId]
+    );
+    return franjas[0] ?? null;
+}
+
 app.post("/api/citas", requireAuth, requireRole("paciente"), async (req, res) => {
     const { medico_id, fecha, hora, motivo } = req.body;
     if (!medico_id || !fecha || !hora) return res.status(400).json({ mensaje: "Médico, fecha y hora son obligatorios" });
@@ -473,6 +490,10 @@ app.post("/api/citas", requireAuth, requireRole("paciente"), async (req, res) =>
         const medicos = await query("SELECT medico_id FROM medicos WHERE medico_id = ?", [medico_id]);
         if (!medicos.length) return res.status(404).json({ mensaje: "El médico seleccionado no existe" });
 
+        // El horario debe caer en una franja de atención del médico (día, hora y slot válidos).
+        const franja = await franjaDelMedico(medico_id, fecha, hora);
+        if (!franja) return res.status(400).json({ mensaje: "El médico no atiende en ese día u hora" });
+
         const conflictos = await query(
             "SELECT cita_id FROM citas WHERE medico_id = ? AND fecha_cita = ? AND hora_cita = ? AND estado NOT IN ('Cancelada', 'No-Asistio')",
             [medico_id, fecha, hora]
@@ -480,8 +501,8 @@ app.post("/api/citas", requireAuth, requireRole("paciente"), async (req, res) =>
         if (conflictos.length) return res.status(409).json({ mensaje: "Ese horario ya está ocupado" });
 
         const cita = await query(
-            "INSERT INTO citas (paciente_id, medico_id, fecha_cita, hora_cita, motivo) VALUES (?, ?, ?, ?, ?)",
-            [pacienteId, medico_id, fecha, hora, motivo?.trim() || null]
+            "INSERT INTO citas (paciente_id, medico_id, sede_id, fecha_cita, hora_cita, motivo) VALUES (?, ?, ?, ?, ?, ?)",
+            [pacienteId, medico_id, franja.sede_id, fecha, hora, motivo?.trim() || null]
         );
         await query(`
             INSERT INTO recordatorios (cita_id, canal_envio, estado_entrega)
@@ -534,6 +555,35 @@ app.delete("/api/citas/:id", requireAuth, requireRole("paciente"), async (req, r
  * cualquier estado válido de una cita.
  *
  */
+// Reemplaza tu ruta app.get("/api/lista-esperada/:estado/count", ...) por esta.
+//
+// IMPORTANTE: debe quedar DESPUÉS de app.get("/api/lista-espera/me/count", ...).
+// Express evalúa las rutas en orden: si esta va antes, "me" se toma como si fuera un
+// estado y /me/count responde 400 "Estado no válido".
+
+app.get("/api/lista-espera/:estado/count", requireAuth, requireRole("paciente"), async (req, res) => {
+    // Estados de la tabla lista_espera (ENUM estado_espera), no los de las citas.
+    const estadosValidos = ["Activo", "Asignado", "Expirado"];
+    const estado = req.params.estado;
+    if (!estadosValidos.includes(estado)) return res.status(400).json({ mensaje: "Estado no válido" });
+
+    try {
+        const users = await query("SELECT paciente_id FROM usuarios WHERE usuario_id = ? AND rol = 'paciente' AND activo = 1", [req.user.id]);
+        const pacienteId = users[0]?.paciente_id;
+        if (!pacienteId) return res.status(400).json({ mensaje: "El usuario no está asociado a un paciente" });
+
+        const result = await query(
+            "SELECT COUNT(*) AS total_espera FROM lista_espera WHERE paciente_id = ? AND estado_espera = ?",
+            [pacienteId, estado]
+        );
+        res.json({ total_espera: result[0].total_espera });
+    } catch (error) {
+        console.error("Error contando lista de espera por estado:", error.message);
+        res.status(500).json({ mensaje: "No fue posible consultar la lista de espera" });
+    }
+});
+
+
 app.get("/api/citas/:estado/count", requireAuth, requireRole("paciente"), async (req, res) => {
     // Lista blanca de los únicos valores permitidos para "estado".
     // Debe coincidir exactamente con el ENUM definido en la columna
@@ -726,7 +776,7 @@ function validar(schema) {
     return (req, res, next) => {
         const resultado = schema.safeParse(req.body);
         if (!resultado.success) {
-            const errores = resultado.error.errors.map(e => `${e.path.join(".")}: ${e.message}`).join("; ");
+            const errores = resultado.error.issues.map(e => `${e.path.join(".")}: ${e.message}`).join("; ");
             return res.status(400).json({ mensaje: "Datos inválidos", errores });
         }
         req.validated = resultado.data;
@@ -739,7 +789,7 @@ function validarQuery(schema) {
     return (req, res, next) => {
         const resultado = schema.safeParse(req.query);
         if (!resultado.success) {
-            const errores = resultado.error.errors.map(e => `${e.path.join(".")}: ${e.message}`).join("; ");
+            const errores = resultado.error.issues.map(e => `${e.path.join(".")}: ${e.message}`).join("; ");
             return res.status(400).json({ mensaje: "Parámetros inválidos", errores });
         }
         req.validatedQuery = resultado.data;
@@ -848,6 +898,39 @@ app.post("/api/usuarios", requireAuth, requireRole("administrador"), validar(sch
         if (error.code === "ER_DUP_ENTRY") return res.status(409).json({ mensaje: "El correo ya está registrado" });
         console.error("Error creando usuario:", error.message);
         res.status(500).json({ mensaje: "No fue posible crear el usuario" });
+    }
+});
+
+app.put("/api/usuarios/me", requireAuth, validar(schemas.actualizarPerfil), async (req, res) => {
+    try {
+        const { nombres, apellidos, telefono, direccion } = req.validated;
+        const users = await query("SELECT paciente_id FROM usuarios WHERE usuario_id = ? AND activo = 1", [req.user.id]);
+        const pacienteId = users[0]?.paciente_id;
+
+        if (pacienteId) {
+            const campos = [];
+            const valores = [];
+            if (nombres || apellidos) {
+                const nombreCompleto = `${nombres || ""} ${apellidos || ""}`.trim();
+                if (nombreCompleto) {
+                    campos.push("nombre_completo = ?");
+                    valores.push(nombreCompleto);
+                    // Actualizar también en usuarios
+                    await query("UPDATE usuarios SET nombre_completo = ? WHERE usuario_id = ?", [nombreCompleto, req.user.id]);
+                }
+            }
+            if (telefono !== undefined) { campos.push("telefono_whatsapp = ?"); valores.push(telefono); }
+            if (direccion !== undefined) { campos.push("direccion = ?"); valores.push(direccion); }
+            if (campos.length) {
+                valores.push(pacienteId);
+                await query(`UPDATE pacientes SET ${campos.join(", ")} WHERE paciente_id = ?`, valores);
+            }
+        }
+
+        res.json({ mensaje: "Perfil actualizado correctamente" });
+    } catch (error) {
+        console.error("Error actualizando perfil:", error.message);
+        res.status(500).json({ mensaje: "No fue posible actualizar el perfil" });
     }
 });
 
@@ -1101,6 +1184,10 @@ app.put("/api/citas/:id/reprogramar", requireAuth, requireRole("paciente"), vali
             if (!sedes.length) return res.status(404).json({ mensaje: "La sede seleccionada no existe" });
         }
 
+        // El nuevo horario debe caer en una franja activa del médico (y de la sede elegida, si hay).
+        const franja = await franjaDelMedico(medicoId, fecha, hora, sede_id ?? null);
+        if (!franja) return res.status(400).json({ mensaje: "El médico no atiende en ese día u hora" });
+
         // Verificar conflicto de horario
         const conflictos = await query(
             "SELECT cita_id FROM citas WHERE medico_id = ? AND fecha_cita = ? AND hora_cita = ? AND estado NOT IN ('Cancelada', 'No-Asistio') AND cita_id <> ?",
@@ -1110,8 +1197,8 @@ app.put("/api/citas/:id/reprogramar", requireAuth, requireRole("paciente"), vali
 
         // Actualizar cita
         await query(
-            `UPDATE citas SET medico_id = ?, sede_id = ?, fecha_cita = ?, hora_cita = ?, motivo = CONCAT(COALESCE(motivo, ''), ' | Reprogramada: ', ?, ' - ', ?) WHERE cita_id = ?`,
-            [medicoId, sedeId, fecha, hora, motivo_cambio, observaciones || "", id]
+            `UPDATE citas SET medico_id = ?, sede_id = ?, fecha_cita = ?, hora_cita = ?, motivo = LEFT(CONCAT(COALESCE(motivo, ''), ' | Reprogramada: ', ?, ' - ', ?), 255) WHERE cita_id = ?`,
+            [medicoId, franja.sede_id, fecha, hora, motivo_cambio, observaciones || "", id]
         );
 
         // Resetear recordatorio
@@ -1143,38 +1230,6 @@ app.get("/api/usuarios/me", requireAuth, async (req, res) => {
     }
 });
 
-app.put("/api/usuarios/me", requireAuth, validar(schemas.actualizarPerfil), async (req, res) => {
-    try {
-        const { nombres, apellidos, telefono, direccion } = req.validated;
-        const users = await query("SELECT paciente_id FROM usuarios WHERE usuario_id = ? AND activo = 1", [req.user.id]);
-        const pacienteId = users[0]?.paciente_id;
-
-        if (pacienteId) {
-            const campos = [];
-            const valores = [];
-            if (nombres || apellidos) {
-                const nombreCompleto = `${nombres || ""} ${apellidos || ""}`.trim();
-                if (nombreCompleto) {
-                    campos.push("nombre_completo = ?");
-                    valores.push(nombreCompleto);
-                    // Actualizar también en usuarios
-                    await query("UPDATE usuarios SET nombre_completo = ? WHERE usuario_id = ?", [nombreCompleto, req.user.id]);
-                }
-            }
-            if (telefono !== undefined) { campos.push("telefono_whatsapp = ?"); valores.push(telefono); }
-            if (direccion !== undefined) { campos.push("direccion = ?"); valores.push(direccion); }
-            if (campos.length) {
-                valores.push(pacienteId);
-                await query(`UPDATE pacientes SET ${campos.join(", ")} WHERE paciente_id = ?`, valores);
-            }
-        }
-
-        res.json({ mensaje: "Perfil actualizado correctamente" });
-    } catch (error) {
-        console.error("Error actualizando perfil:", error.message);
-        res.status(500).json({ mensaje: "No fue posible actualizar el perfil" });
-    }
-});
 
 // -------------------- AUTH: RECUPERAR CONTRASEÑA --------------------
 app.post("/api/auth/recuperar", authLimiter, validar(schemas.recuperarClave), async (req, res) => {
@@ -1236,11 +1291,15 @@ app.get("/api/citas/admin", requireAuth, requireRole("recepcionista", "administr
         const offset = (page - 1) * limit;
         const filtros = [];
         let where = "WHERE 1=1";
-
+ 
         if (fecha) { where += " AND c.fecha_cita = ?"; filtros.push(fecha); }
         if (estado) { where += " AND c.estado = ?"; filtros.push(estado); }
-        if (q) { where += " AND (p.nombre_completo LIKE ? OR p.documento_id LIKE ?)"; filtros.push(`%${q}%`, `%${q}%`); }
-
+        if (q) {
+            const patron = `%${q.replace(/[%_\\]/g, "\\$&")}%`;
+            where += " AND (p.nombre_completo LIKE ? OR p.documento_id LIKE ?)";
+            filtros.push(patron, patron);
+        }
+ 
         const [total, citas] = await Promise.all([
             query(`
                 SELECT COUNT(*) AS total
@@ -1249,10 +1308,11 @@ app.get("/api/citas/admin", requireAuth, requireRole("recepcionista", "administr
                 ${where}
             `, filtros),
             query(`
-                SELECT c.cita_id, DATE_FORMAT(c.fecha_cita, '%Y-%m-%d') AS fecha, TIME_FORMAT(c.hora_cita, '%H:%i') AS hora,
-                       p.nombre_completo AS paciente, p.documento_id, p.telefono_whatsapp,
+                SELECT c.cita_id, c.paciente_id, c.medico_id,
+                       DATE_FORMAT(c.fecha_cita, '%Y-%m-%d') AS fecha, TIME_FORMAT(c.hora_cita, '%H:%i') AS hora,
+                       p.nombre_completo AS paciente, p.documento_id,
                        m.nombre_completo AS medico, m.especialidad,
-                       s.nombre AS sede, c.estado, c.motivo, c.fecha_creacion
+                       s.nombre AS sede, c.estado, c.motivo
                 FROM citas c
                 JOIN pacientes p ON p.paciente_id = c.paciente_id
                 JOIN medicos m ON m.medico_id = c.medico_id
@@ -1262,7 +1322,7 @@ app.get("/api/citas/admin", requireAuth, requireRole("recepcionista", "administr
                 LIMIT ? OFFSET ?
             `, [...filtros, limit, offset])
         ]);
-
+ 
         res.json({ citas, total: total[0].total, page, limit });
     } catch (error) {
         console.error("Error listando citas (recepcionista):", error.message);
@@ -1435,14 +1495,14 @@ app.get("/api/citas/medico", requireAuth, requireRole("medico"), async (req, res
         if (!fecha || Number.isNaN(Date.parse(fecha))) {
             return res.status(400).json({ mensaje: "Fecha es obligatoria" });
         }
-
+ 
         // Obtener medico_id del usuario logueado
         const users = await query("SELECT medico_id FROM usuarios WHERE usuario_id = ? AND rol = 'medico' AND activo = 1", [req.user.id]);
         const medicoId = users[0]?.medico_id;
         if (!medicoId) return res.status(400).json({ mensaje: "El usuario no está asociado a un médico" });
-
+ 
         const citas = await query(`
-            SELECT c.cita_id, TIME_FORMAT(c.hora_cita, '%H:%i') AS hora,
+            SELECT c.cita_id, c.paciente_id, TIME_FORMAT(c.hora_cita, '%H:%i') AS hora,
                    p.nombre_completo AS paciente, p.documento_id,
                    c.motivo, c.estado,
                    s.nombre AS sede
@@ -1452,7 +1512,7 @@ app.get("/api/citas/medico", requireAuth, requireRole("medico"), async (req, res
             WHERE c.medico_id = ? AND c.fecha_cita = ?
             ORDER BY c.hora_cita
         `, [medicoId, fecha]);
-
+ 
         // Contar KPIs
         const [confirmadas, pendientes, canceladas, atendidas] = await Promise.all([
             query("SELECT COUNT(*) AS total FROM citas WHERE medico_id = ? AND fecha_cita = ? AND estado = 'Confirmada'", [medicoId, fecha]),
@@ -1460,7 +1520,7 @@ app.get("/api/citas/medico", requireAuth, requireRole("medico"), async (req, res
             query("SELECT COUNT(*) AS total FROM citas WHERE medico_id = ? AND fecha_cita = ? AND estado = 'Cancelada'", [medicoId, fecha]),
             query("SELECT COUNT(*) AS total FROM citas WHERE medico_id = ? AND fecha_cita = ? AND estado = 'Completada'", [medicoId, fecha])
         ]);
-
+ 
         res.json({
             citas,
             kpis: {

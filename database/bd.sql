@@ -523,3 +523,8 @@ INSERT INTO lista_espera (paciente_id, especialidad_requerida, sede_id, priorida
 (1, 'Cardiología', 2, 'Alta', 'Activo', 'Paciente con antecedentes familiares'),
 (2, 'Dermatología', 3, 'Media', 'Activo', NULL),
 (3, 'Pediatría', 1, 'Baja', 'Activo', 'Control rutinario');
+
+  USE clinicitabd;
+  SELECT COUNT(*) FROM medicos;
+  SELECT COUNT(*) FROM sedes;
+  select * from lista_espera;

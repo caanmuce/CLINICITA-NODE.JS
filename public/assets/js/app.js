@@ -116,14 +116,15 @@ function mostrarAlerta(mensaje, tipo = "info") {
     caja.classList.remove("d-none");
 }
 
-document.addEventListener("submit", (evento) => {
+
+ document.addEventListener("submit", (evento) => {
     const formulario = evento.target;
     if (!formulario.matches("[data-form]")) return;
     evento.preventDefault();
-
+ 
     const accion = formulario.getAttribute("data-form");
     const datos = Object.fromEntries(new FormData(formulario));
-
+ 
     switch (accion) {
         case "login":
             api("/auth/login", { method: "POST", body: JSON.stringify(datos) })
@@ -160,12 +161,11 @@ document.addEventListener("submit", (evento) => {
                 })
                 .catch((error) => mostrarAlerta(error.message, "danger"));
             break;
-               case "reprogramar": {
+        case "reprogramar": {
             if (!datos.cita_id) {
                 mostrarAlerta("Selecciona la cita a reprogramar", "warning");
                 break;
             }
-            // FormData entrega strings; el backend espera medico_id como número
             const cuerpo = {
                 fecha: datos.fecha,
                 hora: datos.hora,
@@ -173,7 +173,7 @@ document.addEventListener("submit", (evento) => {
             };
             if (datos.medico_id) cuerpo.medico_id = Number(datos.medico_id);
             if (datos.observaciones) cuerpo.observaciones = datos.observaciones;
-
+ 
             api(`/citas/${encodeURIComponent(datos.cita_id)}/reprogramar`, {
                 method: "PUT",
                 body: JSON.stringify(cuerpo)
@@ -181,11 +181,12 @@ document.addEventListener("submit", (evento) => {
                 .then((respuesta) => {
                     mostrarAlerta(respuesta.mensaje, "success");
                     formulario.reset();
+                    cargarHorarios();
+                    setTimeout(() => { window.location.href = "mis-citas.html"; }, 1500);
                 })
                 .catch((error) => mostrarAlerta(error.message, "danger"));
             break;
         }
-            break;
         case "perfil":
             mostrarAlerta("Actualización de perfil lista para conectar con el backend.", "warning");
             break;
@@ -205,13 +206,18 @@ document.addEventListener("submit", (evento) => {
             mostrarAlerta("Formulario enviado. Conectar con base de datos.", "warning");
     }
 });
-
+ // Refresca la información de la página cada cierto tiempo (ms), pero solo si
+ //  el usuario tiene la pestaña visible.
+ //  Evita que se acumulen peticiones mientras el usuario está en otra pestaña.
+function refrescarCada(funcion, ms = 60000) {
+    window.setInterval(() => {
+        if (!document.hidden) funcion();
+    }, ms);
+}
 document.addEventListener("DOMContentLoaded", () => {
     // El orden importa: pintarSesion() crea el botón de logout en el navbar
     // y configurarLogout() lo busca para conectarle el clic, así que tiene
-    // que ir después.
-    if (!document.getElementById("tabla-espera")) return;
-    llenarEspecialidadesListaEspera();
+    // que ir después
 
     cargarListaEspera();
     pintarSesion();
@@ -248,34 +254,34 @@ document.addEventListener("DOMContentLoaded", () => {
         cargarCitasParaReprogramar();
     }
 
-    // Página "Mis citas": las tres tablas por estado, refrescadas cada 15 s.
+    // Página "Mis citas": las tres tablas por estado, refrescadas cada 60 s.
     if (document.getElementById("tabla-pendientes")) {
         cargarMisCitas();
-        window.setInterval(cargarMisCitas, 15000);
+        refrescarCada(cargarMisCitas);
     }
 
-    // Dashboard: tarjeta de "Próxima cita", refrescada cada 15 s.
+    // Dashboard: tarjeta de "Próxima cita", refrescada cada 60 s.
     if (document.getElementById("empty-proxima")) {
         cargarProximaCita();
-        window.setInterval(cargarProximaCita, 15000);
+        refrescarCada(cargarProximaCita);
     }
 
-    // Dashboard: tarjetas KPI (próximas, pendientes, canceladas), cada 15 s.
+    // Dashboard: tarjetas KPI (próximas, pendientes, canceladas), cada 60 s.
     if (document.getElementById("kpi-proximas")) {
         numerosDelKpi();
-        window.setInterval(numerosDelKpi, 15000);
+        refrescarCada(numerosDelKpi);
     }
 
-    // Recepcionista: citas con filtros y coloreo de riesgo, cada 15 s.
+    // Recepcionista: citas con filtros y coloreo de riesgo, cada 60 s.
     if (document.getElementById("tabla-citas")) {
         cargarCitasRecepcionista();
-        window.setInterval(cargarCitasRecepcionista, 15000);
+        refrescarCada(cargarCitasRecepcionista);
     }
 
-    // Médico: agenda del día con coloreo de riesgo, cada 15 s.
+    // Médico: agenda del día con coloreo de riesgo, cada 60 s.
     if (document.getElementById("tabla-agenda")) {
         cargarAgendaMedico();
-        window.setInterval(cargarAgendaMedico, 15000);
+        refrescarCada(cargarAgendaMedico);
     }
 });
 
@@ -283,7 +289,11 @@ async function cargarFormularioCita() {
     const especialidad = document.getElementById("especialidad");
     const medico = document.getElementById("medico");
     const fecha = document.getElementById("fecha");
-
+ 
+    // No se pueden elegir fechas pasadas (el servidor igual lo valida).
+    // "sv-SE" da el formato AAAA-MM-DD en hora local.
+    if (fecha) fecha.min = new Date().toLocaleDateString("sv-SE");
+ 
     try {
         const respuesta = await api("/especialidades");
         respuesta.especialidades.forEach((item) => {
@@ -295,32 +305,63 @@ async function cargarFormularioCita() {
     } catch (error) {
         mostrarAlerta(error.message, "danger");
     }
-
+ 
     especialidad.addEventListener("change", async () => {
         medico.innerHTML = '<option value="">Selecciona...</option>';
+        cargarHorarios(); // al cambiar de especialidad, el médico anterior ya no aplica
         if (!especialidad.value) return;
-        const respuesta = await api(`/medicos?especialidad=${encodeURIComponent(especialidad.value)}`);
-        respuesta.medicos.forEach((item) => {
-            const opcion = document.createElement("option");
-            opcion.value = item.medico_id;
-            opcion.textContent = item.nombre_completo;
-            medico.appendChild(opcion);
-        });
+        try {
+            const respuesta = await api(`/medicos?especialidad=${encodeURIComponent(especialidad.value)}`);
+            respuesta.medicos.forEach((item) => {
+                const opcion = document.createElement("option");
+                opcion.value = item.medico_id;
+                opcion.textContent = item.nombre_completo;
+                medico.appendChild(opcion);
+            });
+        } catch (error) {
+            mostrarAlerta(error.message, "danger");
+        }
     });
-
+ 
     medico.addEventListener("change", cargarHorarios);
     fecha.addEventListener("change", cargarHorarios);
 }
 
+/**
+ * Llena el select "hora" con las horas libres del médico en la fecha elegida
+ * (GET /api/horarios?medico=&fecha=). Queda deshabilitado hasta que haya médico y fecha.
+ */
 async function cargarHorarios() {
     const medico = document.getElementById("medico");
     const fecha = document.getElementById("fecha");
     const hora = document.getElementById("hora");
     if (!medico || !fecha || !hora) return;
-
+ 
+    hora.innerHTML = '<option value="">Selecciona médico y fecha primero...</option>';
     hora.disabled = !medico.value || !fecha.value;
+    if (hora.disabled) return;
+ 
+    // Si el usuario cambia de médico o fecha mientras llega la respuesta, se descarta la vieja.
+    const consulta = `${medico.value}|${fecha.value}`;
+ 
+    try {
+        const respuesta = await api(`/horarios?medico=${encodeURIComponent(medico.value)}&fecha=${encodeURIComponent(fecha.value)}`);
+        if (consulta !== `${medico.value}|${fecha.value}`) return;
+ 
+        const horas = respuesta.horarios || [];
+        hora.innerHTML = horas.length
+            ? '<option value="">Selecciona...</option>'
+            : '<option value="">Sin horarios disponibles ese día</option>';
+        horas.forEach((h) => {
+            const opcion = document.createElement("option");
+            opcion.value = h;
+            opcion.textContent = h;
+            hora.appendChild(opcion);
+        });
+    } catch (error) {
+        mostrarAlerta(error.message, "danger");
+    }
 }
-
 /**
  * Carga las citas del paciente autenticado y las distribuye en TRES
  * tablas separadas según su estado (Pendiente, Confirmada, Cancelada),
@@ -518,24 +559,21 @@ async function numerosDelKpi() {
     const kpiPendientes = document.getElementById("kpi-pendientes");
     const kpiCanceladas = document.getElementById("kpi-canceladas");
     const kpiEspera = document.getElementById("kpi-espera");
-
+ 
     if (!kpiProximas && !kpiPendientes && !kpiCanceladas && !kpiEspera) return;
-
+ 
     try {
-        const [pendientes, confirmadas, canceladas] = await Promise.all([
+        const [pendientes, confirmadas, canceladas, espera] = await Promise.all([
             api("/citas/Pendiente/count"),
             api("/citas/Confirmada/count"),
-            api("/citas/Cancelada/count")
+            api("/citas/Cancelada/count"),
+            api("/lista-espera/Activo/count").catch(() => ({ total_espera: "—" }))
         ]);
-
+ 
         if (kpiProximas) kpiProximas.textContent = pendientes.total_citas + confirmadas.total_citas;
         if (kpiPendientes) kpiPendientes.textContent = pendientes.total_citas;
         if (kpiCanceladas) kpiCanceladas.textContent = canceladas.total_citas;
-
-        // Lista de espera: endpoint todavía no existe en el backend.
-        // Se deja un placeholder para no romper la tarjeta mientras tanto.
-        if (kpiEspera) kpiEspera.textContent = "—";
-
+        if (kpiEspera) kpiEspera.textContent = espera.total_espera;
     } catch (error) {
         mostrarAlerta(error.message, "danger");
     }
@@ -746,7 +784,7 @@ async function cargarCitasRecepcionista() {
 
         const params = new URLSearchParams();
         if (fecha) params.append("fecha", fecha);
-        if (estado) params.append("estado", estado.charAt(0).toUpperCase() + estado.slice(1)); 
+        if (estado) params.append("estado", estado);
         if (q) params.append("q", q);
         params.append("page", "1");
         params.append("limit", "50");
@@ -1040,24 +1078,29 @@ async function inicializarColoreoRiesgo(tbodyId) {
 
 
 // ============================================================
+// LISTA DE ESPERA (recepcionista) — adaptado a lista-espera.html
+// Pegar al final de assets/js/app.js
+// (si ya habías pegado la versión anterior, bórrala primero)
 //
-// Endpoints 
+// Endpoints (ya existen en server.js):
 //   GET    /api/lista-espera?estado=Activo
 //   POST   /api/lista-espera
 //   PUT    /api/lista-espera/:id
 //   DELETE /api/lista-espera/:id
 //   GET    /api/especialidades
 //
+// ============================================================
+// Escapa texto antes de meterlo en innerHTML (evita XSS con nombres/observaciones).
 function escaparHTML(valor) {
     return String(valor ?? "").replace(/[&<>"']/g, (c) => (
         { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
     ));
 }
 
-// El <select name="prioridad"> del HTML usa "normal"/"alta";
-// el backend usa "Alta" | "Media" | "Baja".
-const PRIORIDAD_FORM_A_API = { normal: "Media", alta: "Alta", baja: "Baja" };
-const PRIORIDAD_ETIQUETA = { Alta: "Alta", Media: "Normal", Baja: "Baja" };
+// El <select name="prioridad"> del HTML usa "alta"/"media"/"baja";
+// el backend usa "Alta" | "Media" | "Baja". ("normal" se deja como alias de media.)
+const PRIORIDAD_FORM_A_API = { alta: "Alta", media: "Media", normal: "Media", baja: "Baja" };
+const PRIORIDAD_ETIQUETA = { Alta: "Alta", Media: "Media", Baja: "Baja" };
 
 /**
  * Llena el select de especialidad del formulario (name="especialidad_id").
@@ -1219,4 +1262,33 @@ document.addEventListener("click", async (evento) => {
 document.addEventListener("change", (evento) => {
     const select = evento.target.closest("select[data-espera-prioridad]");
     if (select) actualizarListaEspera(select.dataset.esperaId, { prioridad: select.value });
+});
+
+// Arranque: solo actúa en la página que tiene #tabla-espera.
+// Sin setInterval a propósito (el rate limit del servidor no lo aguanta):
+// la tabla se recarga tras cada acción.
+document.addEventListener("DOMContentLoaded", () => {
+    if (!document.getElementById("tabla-espera")) return;
+    llenarEspecialidadesListaEspera();
+    cargarListaEspera();
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+    const filtros = document.getElementById("filtros-citas");
+    if (!filtros) return;
+
+    // Botón Buscar
+    filtros.querySelector('button[type="button"]')?.addEventListener("click", cargarCitasRecepcionista);
+
+    // Enter dentro de los campos de texto
+    filtros.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && e.target.matches("input")) {
+            e.preventDefault();
+            cargarCitasRecepcionista();
+        }
+    });
+
+    // Al cambiar la fecha o el estado, la tabla se recarga sola
+    filtros.querySelectorAll("select, input[type='date']").forEach((el) =>
+        el.addEventListener("change", cargarCitasRecepcionista));
 });
