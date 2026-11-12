@@ -246,13 +246,20 @@ async function initializeAuth() {
         WHERE correo = 'paciente@clinicita.com' AND paciente_id IS NULL
     `);
 }
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            "default-src": ["'self'"],
+            "script-src": ["'self'", "https://cdn.jsdelivr.net"],
+            "style-src": ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
+            "font-src": ["'self'", "https://cdn.jsdelivr.net", "https://fonts.gstatic.com", "data:"],
+            "img-src": ["'self'", "data:", "https://images.unsplash.com"],
+            "connect-src": ["'self'", "https://cdn.jsdelivr.net"],
+            "upgrade-insecure-requests": null
+        }
+    }
+}));
 
-app.use(helmet());
-console.log("DEBUG: helmet middleware registered");
-app.use((req, res, next) => {
-    console.log("DEBUG: helmet middleware hit for:", req.path);
-    next();
-});
 app.use(cors({
     origin: process.env.CORS_ORIGIN || "http://localhost:3000",
     credentials: true
@@ -274,7 +281,7 @@ const authLimiter = rateLimit({
 
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 100, // máximo 100 requests por IP
+    max: Number(process.env.API_RATE_LIMIT_MAX || 1000), // por IP cada 15 min
     standardHeaders: true,
     legacyHeaders: false
 });
@@ -399,18 +406,68 @@ app.get("/api/medicos", requireAuth, requireRole("paciente", "recepcionista", "a
     res.json({ medicos });
 });
 
-app.get("/api/horarios", requireAuth, requireRole("paciente"), async (req, res) => {
+app.get("/api/horarios", requireAuth, requireRole("paciente", "recepcionista", "administrador"), async (req, res) => {
     const { medico, fecha } = req.query;
-    if (!medico || !fecha || Number.isNaN(Date.parse(fecha))) return res.status(400).json({ mensaje: "Médico y fecha son obligatorios" });
+    if (!medico || !/^\d{4}-\d{2}-\d{2}$/.test(String(fecha || "")) || Number.isNaN(Date.parse(fecha))) {
+        return res.status(400).json({ mensaje: "Médico y fecha son obligatorios" });
+    }
 
-    const ocupadas = await query(
-        "SELECT hora_cita FROM citas WHERE medico_id = ? AND fecha_cita = ? AND estado NOT IN ('Cancelada', 'No-Asistio')",
-        [medico, fecha]
-    );
-    const ocupadasSet = new Set(ocupadas.map((cita) => String(cita.hora_cita).slice(0, 5)));
-    const horasBase = ["08:00", "09:00", "10:00", "11:00", "14:00", "15:00", "16:00"];
-    res.json({ horarios: horasBase.filter((hora) => !ocupadasSet.has(hora)) });
+    try {
+        const franjas = await query(
+            `SELECT TIME_FORMAT(hora_inicio, '%H:%i') AS inicio,
+                    TIME_FORMAT(hora_fin, '%H:%i') AS fin,
+                    duracion_slot
+             FROM horarios
+             WHERE medico_id = ? AND activo = 1 AND dia_semana = DAYOFWEEK(?) - 1
+             ORDER BY hora_inicio`,
+            [medico, fecha]
+        );
+        const ocupadas = await query(
+            `SELECT TIME_FORMAT(hora_cita, '%H:%i') AS hora
+             FROM citas
+             WHERE medico_id = ? AND fecha_cita = ? AND estado NOT IN ('Cancelada', 'No-Asistio')`,
+            [medico, fecha]
+        );
+        const ocupadasSet = new Set(ocupadas.map((c) => c.hora));
+
+        const offset = process.env.CLINIC_UTC_OFFSET || "-05:00";
+        const ahora = new Date();
+        const aMinutos = (hhmm) => { const [h, m] = hhmm.split(":").map(Number); return h * 60 + m; };
+        const aHHMM = (min) => `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+
+        const horarios = [];
+        for (const franja of franjas) {
+            for (let min = aMinutos(franja.inicio); min < aMinutos(franja.fin); min += franja.duracion_slot) {
+                const hora = aHHMM(min);
+                if (ocupadasSet.has(hora)) continue;
+                if (new Date(`${fecha}T${hora}:00${offset}`) <= ahora) continue; // no ofrecer horas pasadas
+                horarios.push(hora);
+            }
+        }
+
+        res.json({ horarios });
+    } catch (error) {
+        console.error("Error consultando horarios:", error.message);
+        res.status(500).json({ mensaje: "No fue posible consultar los horarios" });
+    }
 });
+
+// Devuelve la franja de atención (con su sede) que cubre esa hora, o null si el médico no atiende.
+// Es la misma regla que ya usa POST /api/citas/admin: dentro de una franja activa y alineada al slot.
+async function franjaDelMedico(medicoId, fecha, hora, sedeId = null) {
+    const horaSQL = `${hora}:00`;
+    const franjas = await query(
+        `SELECT sede_id FROM horarios
+         WHERE medico_id = ? AND activo = 1
+           AND dia_semana = DAYOFWEEK(?) - 1
+           AND ? >= hora_inicio AND ? < hora_fin
+           AND MOD(TIME_TO_SEC(TIMEDIFF(?, hora_inicio)), duracion_slot * 60) = 0
+           AND (? IS NULL OR sede_id = ?)
+         LIMIT 1`,
+        [medicoId, fecha, horaSQL, horaSQL, horaSQL, sedeId, sedeId]
+    );
+    return franjas[0] ?? null;
+}
 
 app.post("/api/citas", requireAuth, requireRole("paciente"), async (req, res) => {
     const { medico_id, fecha, hora, motivo } = req.body;
@@ -433,6 +490,10 @@ app.post("/api/citas", requireAuth, requireRole("paciente"), async (req, res) =>
         const medicos = await query("SELECT medico_id FROM medicos WHERE medico_id = ?", [medico_id]);
         if (!medicos.length) return res.status(404).json({ mensaje: "El médico seleccionado no existe" });
 
+        // El horario debe caer en una franja de atención del médico (día, hora y slot válidos).
+        const franja = await franjaDelMedico(medico_id, fecha, hora);
+        if (!franja) return res.status(400).json({ mensaje: "El médico no atiende en ese día u hora" });
+
         const conflictos = await query(
             "SELECT cita_id FROM citas WHERE medico_id = ? AND fecha_cita = ? AND hora_cita = ? AND estado NOT IN ('Cancelada', 'No-Asistio')",
             [medico_id, fecha, hora]
@@ -440,8 +501,8 @@ app.post("/api/citas", requireAuth, requireRole("paciente"), async (req, res) =>
         if (conflictos.length) return res.status(409).json({ mensaje: "Ese horario ya está ocupado" });
 
         const cita = await query(
-            "INSERT INTO citas (paciente_id, medico_id, fecha_cita, hora_cita, motivo) VALUES (?, ?, ?, ?, ?)",
-            [pacienteId, medico_id, fecha, hora, motivo?.trim() || null]
+            "INSERT INTO citas (paciente_id, medico_id, sede_id, fecha_cita, hora_cita, motivo) VALUES (?, ?, ?, ?, ?, ?)",
+            [pacienteId, medico_id, franja.sede_id, fecha, hora, motivo?.trim() || null]
         );
         await query(`
             INSERT INTO recordatorios (cita_id, canal_envio, estado_entrega)
@@ -494,6 +555,35 @@ app.delete("/api/citas/:id", requireAuth, requireRole("paciente"), async (req, r
  * cualquier estado válido de una cita.
  *
  */
+// Reemplaza tu ruta app.get("/api/lista-esperada/:estado/count", ...) por esta.
+//
+// IMPORTANTE: debe quedar DESPUÉS de app.get("/api/lista-espera/me/count", ...).
+// Express evalúa las rutas en orden: si esta va antes, "me" se toma como si fuera un
+// estado y /me/count responde 400 "Estado no válido".
+
+app.get("/api/lista-espera/:estado/count", requireAuth, requireRole("paciente"), async (req, res) => {
+    // Estados de la tabla lista_espera (ENUM estado_espera), no los de las citas.
+    const estadosValidos = ["Activo", "Asignado", "Expirado"];
+    const estado = req.params.estado;
+    if (!estadosValidos.includes(estado)) return res.status(400).json({ mensaje: "Estado no válido" });
+
+    try {
+        const users = await query("SELECT paciente_id FROM usuarios WHERE usuario_id = ? AND rol = 'paciente' AND activo = 1", [req.user.id]);
+        const pacienteId = users[0]?.paciente_id;
+        if (!pacienteId) return res.status(400).json({ mensaje: "El usuario no está asociado a un paciente" });
+
+        const result = await query(
+            "SELECT COUNT(*) AS total_espera FROM lista_espera WHERE paciente_id = ? AND estado_espera = ?",
+            [pacienteId, estado]
+        );
+        res.json({ total_espera: result[0].total_espera });
+    } catch (error) {
+        console.error("Error contando lista de espera por estado:", error.message);
+        res.status(500).json({ mensaje: "No fue posible consultar la lista de espera" });
+    }
+});
+
+
 app.get("/api/citas/:estado/count", requireAuth, requireRole("paciente"), async (req, res) => {
     // Lista blanca de los únicos valores permitidos para "estado".
     // Debe coincidir exactamente con el ENUM definido en la columna
@@ -620,11 +710,40 @@ const schemas = {
         token: z.string().min(32).max(64),
         nueva_clave: z.string().min(6).max(50)
     }),
+    // Auth: Cambiar clave estando logueado (cualquier rol)
+    cambiarClave: z.object({
+        clave_actual: z.string().min(1).max(50),
+        nueva_clave: z.string().min(6).max(50)
+    }).refine((d) => d.clave_actual !== d.nueva_clave, {
+        message: "La nueva contraseña debe ser distinta de la actual",
+        path: ["nueva_clave"]
+    }),
     // Recepcionista: Citas filtros
     filtrosCitas: z.object({
         fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
         estado: z.enum(["Pendiente", "Confirmada", "Cancelada", "Completada", "No-Asistio"]).optional(),
         q: z.string().max(100).optional(),
+        page: z.coerce.number().int().positive().default(1),
+        limit: z.coerce.number().int().positive().max(100).default(20)
+    }),
+    // Recepcionista: buscar pacientes
+    filtrosPacientes: z.object({
+        q: z.string().trim().min(2).max(100),
+        limit: z.coerce.number().int().positive().max(20).default(10)
+    }),
+    // Recepcionista: agendar a nombre de un paciente
+    crearCitaAdmin: z.object({
+        paciente_id: z.number().int().positive(),
+        medico_id: z.number().int().positive(),
+        sede_id: z.number().int().positive().optional(), // opcional: se deduce de `horarios`
+        fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        hora: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+        motivo: z.string().trim().max(255).optional()
+    }),
+    // Recepcionista: filtros de recordatorios
+    filtrosRecordatorios: z.object({
+        estado: z.enum(["Pendiente", "Enviado", "Entregado", "Fallido"]).optional(),
+        fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), // fecha de la cita
         page: z.coerce.number().int().positive().default(1),
         limit: z.coerce.number().int().positive().max(100).default(20)
     }),
@@ -641,18 +760,23 @@ const schemas = {
         estado_espera: z.enum(["Activo", "Asignado", "Expirado"]).optional(),
         observaciones: z.string().max(500).optional().nullable()
     }),
+    // Paciente: inscribirse a la lista de espera (la prioridad la decide recepción)
+    inscribirListaEsperaPaciente: z.object({
+        especialidad_requerida: z.string().trim().min(2).max(50),
+        sede_id: z.number().int().positive().optional(),
+        observaciones: z.string().trim().max(500).optional()
+    }),
     // Médico: Cambiar estado cita
     cambiarEstadoCita: z.object({
         estado: z.enum(["Confirmada", "Completada", "No-Asistio"])
     })
 };
-
 // Middleware de validación genérico
 function validar(schema) {
     return (req, res, next) => {
         const resultado = schema.safeParse(req.body);
         if (!resultado.success) {
-            const errores = resultado.error.errors.map(e => `${e.path.join(".")}: ${e.message}`).join("; ");
+            const errores = resultado.error.issues.map(e => `${e.path.join(".")}: ${e.message}`).join("; ");
             return res.status(400).json({ mensaje: "Datos inválidos", errores });
         }
         req.validated = resultado.data;
@@ -665,7 +789,7 @@ function validarQuery(schema) {
     return (req, res, next) => {
         const resultado = schema.safeParse(req.query);
         if (!resultado.success) {
-            const errores = resultado.error.errors.map(e => `${e.path.join(".")}: ${e.message}`).join("; ");
+            const errores = resultado.error.issues.map(e => `${e.path.join(".")}: ${e.message}`).join("; ");
             return res.status(400).json({ mensaje: "Parámetros inválidos", errores });
         }
         req.validatedQuery = resultado.data;
@@ -774,6 +898,39 @@ app.post("/api/usuarios", requireAuth, requireRole("administrador"), validar(sch
         if (error.code === "ER_DUP_ENTRY") return res.status(409).json({ mensaje: "El correo ya está registrado" });
         console.error("Error creando usuario:", error.message);
         res.status(500).json({ mensaje: "No fue posible crear el usuario" });
+    }
+});
+
+app.put("/api/usuarios/me", requireAuth, validar(schemas.actualizarPerfil), async (req, res) => {
+    try {
+        const { nombres, apellidos, telefono, direccion } = req.validated;
+        const users = await query("SELECT paciente_id FROM usuarios WHERE usuario_id = ? AND activo = 1", [req.user.id]);
+        const pacienteId = users[0]?.paciente_id;
+
+        if (pacienteId) {
+            const campos = [];
+            const valores = [];
+            if (nombres || apellidos) {
+                const nombreCompleto = `${nombres || ""} ${apellidos || ""}`.trim();
+                if (nombreCompleto) {
+                    campos.push("nombre_completo = ?");
+                    valores.push(nombreCompleto);
+                    // Actualizar también en usuarios
+                    await query("UPDATE usuarios SET nombre_completo = ? WHERE usuario_id = ?", [nombreCompleto, req.user.id]);
+                }
+            }
+            if (telefono !== undefined) { campos.push("telefono_whatsapp = ?"); valores.push(telefono); }
+            if (direccion !== undefined) { campos.push("direccion = ?"); valores.push(direccion); }
+            if (campos.length) {
+                valores.push(pacienteId);
+                await query(`UPDATE pacientes SET ${campos.join(", ")} WHERE paciente_id = ?`, valores);
+            }
+        }
+
+        res.json({ mensaje: "Perfil actualizado correctamente" });
+    } catch (error) {
+        console.error("Error actualizando perfil:", error.message);
+        res.status(500).json({ mensaje: "No fue posible actualizar el perfil" });
     }
 });
 
@@ -1027,6 +1184,10 @@ app.put("/api/citas/:id/reprogramar", requireAuth, requireRole("paciente"), vali
             if (!sedes.length) return res.status(404).json({ mensaje: "La sede seleccionada no existe" });
         }
 
+        // El nuevo horario debe caer en una franja activa del médico (y de la sede elegida, si hay).
+        const franja = await franjaDelMedico(medicoId, fecha, hora, sede_id ?? null);
+        if (!franja) return res.status(400).json({ mensaje: "El médico no atiende en ese día u hora" });
+
         // Verificar conflicto de horario
         const conflictos = await query(
             "SELECT cita_id FROM citas WHERE medico_id = ? AND fecha_cita = ? AND hora_cita = ? AND estado NOT IN ('Cancelada', 'No-Asistio') AND cita_id <> ?",
@@ -1036,8 +1197,8 @@ app.put("/api/citas/:id/reprogramar", requireAuth, requireRole("paciente"), vali
 
         // Actualizar cita
         await query(
-            `UPDATE citas SET medico_id = ?, sede_id = ?, fecha_cita = ?, hora_cita = ?, motivo = CONCAT(COALESCE(motivo, ''), ' | Reprogramada: ', ?, ' - ', ?) WHERE cita_id = ?`,
-            [medicoId, sedeId, fecha, hora, motivo_cambio, observaciones || "", id]
+            `UPDATE citas SET medico_id = ?, sede_id = ?, fecha_cita = ?, hora_cita = ?, motivo = LEFT(CONCAT(COALESCE(motivo, ''), ' | Reprogramada: ', ?, ' - ', ?), 255) WHERE cita_id = ?`,
+            [medicoId, franja.sede_id, fecha, hora, motivo_cambio, observaciones || "", id]
         );
 
         // Resetear recordatorio
@@ -1069,38 +1230,6 @@ app.get("/api/usuarios/me", requireAuth, async (req, res) => {
     }
 });
 
-app.put("/api/usuarios/me", requireAuth, validar(schemas.actualizarPerfil), async (req, res) => {
-    try {
-        const { nombres, apellidos, telefono, direccion } = req.validated;
-        const users = await query("SELECT paciente_id FROM usuarios WHERE usuario_id = ? AND activo = 1", [req.user.id]);
-        const pacienteId = users[0]?.paciente_id;
-
-        if (pacienteId) {
-            const campos = [];
-            const valores = [];
-            if (nombres || apellidos) {
-                const nombreCompleto = `${nombres || ""} ${apellidos || ""}`.trim();
-                if (nombreCompleto) {
-                    campos.push("nombre_completo = ?");
-                    valores.push(nombreCompleto);
-                    // Actualizar también en usuarios
-                    await query("UPDATE usuarios SET nombre_completo = ? WHERE usuario_id = ?", [nombreCompleto, req.user.id]);
-                }
-            }
-            if (telefono !== undefined) { campos.push("telefono_whatsapp = ?"); valores.push(telefono); }
-            if (direccion !== undefined) { campos.push("direccion = ?"); valores.push(direccion); }
-            if (campos.length) {
-                valores.push(pacienteId);
-                await query(`UPDATE pacientes SET ${campos.join(", ")} WHERE paciente_id = ?`, valores);
-            }
-        }
-
-        res.json({ mensaje: "Perfil actualizado correctamente" });
-    } catch (error) {
-        console.error("Error actualizando perfil:", error.message);
-        res.status(500).json({ mensaje: "No fue posible actualizar el perfil" });
-    }
-});
 
 // -------------------- AUTH: RECUPERAR CONTRASEÑA --------------------
 app.post("/api/auth/recuperar", authLimiter, validar(schemas.recuperarClave), async (req, res) => {
@@ -1162,11 +1291,15 @@ app.get("/api/citas/admin", requireAuth, requireRole("recepcionista", "administr
         const offset = (page - 1) * limit;
         const filtros = [];
         let where = "WHERE 1=1";
-
+ 
         if (fecha) { where += " AND c.fecha_cita = ?"; filtros.push(fecha); }
         if (estado) { where += " AND c.estado = ?"; filtros.push(estado); }
-        if (q) { where += " AND (p.nombre_completo LIKE ? OR p.documento_id LIKE ?)"; filtros.push(`%${q}%`, `%${q}%`); }
-
+        if (q) {
+            const patron = `%${q.replace(/[%_\\]/g, "\\$&")}%`;
+            where += " AND (p.nombre_completo LIKE ? OR p.documento_id LIKE ?)";
+            filtros.push(patron, patron);
+        }
+ 
         const [total, citas] = await Promise.all([
             query(`
                 SELECT COUNT(*) AS total
@@ -1175,10 +1308,11 @@ app.get("/api/citas/admin", requireAuth, requireRole("recepcionista", "administr
                 ${where}
             `, filtros),
             query(`
-                SELECT c.cita_id, DATE_FORMAT(c.fecha_cita, '%Y-%m-%d') AS fecha, TIME_FORMAT(c.hora_cita, '%H:%i') AS hora,
-                       p.nombre_completo AS paciente, p.documento_id, p.telefono_whatsapp,
+                SELECT c.cita_id, c.paciente_id, c.medico_id,
+                       DATE_FORMAT(c.fecha_cita, '%Y-%m-%d') AS fecha, TIME_FORMAT(c.hora_cita, '%H:%i') AS hora,
+                       p.nombre_completo AS paciente, p.documento_id,
                        m.nombre_completo AS medico, m.especialidad,
-                       s.nombre AS sede, c.estado, c.motivo, c.fecha_creacion
+                       s.nombre AS sede, c.estado, c.motivo
                 FROM citas c
                 JOIN pacientes p ON p.paciente_id = c.paciente_id
                 JOIN medicos m ON m.medico_id = c.medico_id
@@ -1188,7 +1322,7 @@ app.get("/api/citas/admin", requireAuth, requireRole("recepcionista", "administr
                 LIMIT ? OFFSET ?
             `, [...filtros, limit, offset])
         ]);
-
+ 
         res.json({ citas, total: total[0].total, page, limit });
     } catch (error) {
         console.error("Error listando citas (recepcionista):", error.message);
@@ -1361,14 +1495,14 @@ app.get("/api/citas/medico", requireAuth, requireRole("medico"), async (req, res
         if (!fecha || Number.isNaN(Date.parse(fecha))) {
             return res.status(400).json({ mensaje: "Fecha es obligatoria" });
         }
-
+ 
         // Obtener medico_id del usuario logueado
         const users = await query("SELECT medico_id FROM usuarios WHERE usuario_id = ? AND rol = 'medico' AND activo = 1", [req.user.id]);
         const medicoId = users[0]?.medico_id;
         if (!medicoId) return res.status(400).json({ mensaje: "El usuario no está asociado a un médico" });
-
+ 
         const citas = await query(`
-            SELECT c.cita_id, TIME_FORMAT(c.hora_cita, '%H:%i') AS hora,
+            SELECT c.cita_id, c.paciente_id, TIME_FORMAT(c.hora_cita, '%H:%i') AS hora,
                    p.nombre_completo AS paciente, p.documento_id,
                    c.motivo, c.estado,
                    s.nombre AS sede
@@ -1378,7 +1512,7 @@ app.get("/api/citas/medico", requireAuth, requireRole("medico"), async (req, res
             WHERE c.medico_id = ? AND c.fecha_cita = ?
             ORDER BY c.hora_cita
         `, [medicoId, fecha]);
-
+ 
         // Contar KPIs
         const [confirmadas, pendientes, canceladas, atendidas] = await Promise.all([
             query("SELECT COUNT(*) AS total FROM citas WHERE medico_id = ? AND fecha_cita = ? AND estado = 'Confirmada'", [medicoId, fecha]),
@@ -1386,7 +1520,7 @@ app.get("/api/citas/medico", requireAuth, requireRole("medico"), async (req, res
             query("SELECT COUNT(*) AS total FROM citas WHERE medico_id = ? AND fecha_cita = ? AND estado = 'Cancelada'", [medicoId, fecha]),
             query("SELECT COUNT(*) AS total FROM citas WHERE medico_id = ? AND fecha_cita = ? AND estado = 'Completada'", [medicoId, fecha])
         ]);
-
+ 
         res.json({
             citas,
             kpis: {
@@ -1520,3 +1654,361 @@ initializeAuth()
         console.error("No fue posible preparar la autenticación:", error);
         process.exit(1);
     });
+
+
+
+//   1) Los schemas: dentro del objeto `schemas` (junto a filtrosCitas),
+//      o déjalos con Object.assign justo debajo de `const schemas = {...}`.
+//   2) Las dos rutas nuevas: después de `app.get("/api/citas/admin", ...)`.
+//   3) El GET /api/horarios: reemplaza la ruta existente (ver sección 4).
+
+
+
+// ---------- 2) Buscar pacientes ----------
+// Devuelve lo mínimo necesario para identificar al paciente (no expone teléfono).
+app.get("/api/pacientes", requireAuth, requireRole("recepcionista", "administrador"), validarQuery(schemas.filtrosPacientes), async (req, res) => {
+    try {
+        const { q, limit } = req.validatedQuery;
+
+        // Escapa % _ \ para que el texto buscado no actúe como comodín
+        const patron = `%${q.replace(/[%_\\]/g, "\\$&")}%`;
+
+        const pacientes = await query(
+            `SELECT paciente_id, nombre_completo, documento_id
+             FROM pacientes
+             WHERE nombre_completo LIKE ? OR documento_id LIKE ?
+             ORDER BY nombre_completo
+             LIMIT ?`,
+            [patron, patron, limit]
+        );
+
+        res.json({ pacientes });
+    } catch (error) {
+        console.error("Error buscando pacientes:", error.message);
+        res.status(500).json({ mensaje: "No fue posible buscar pacientes" });
+    }
+});
+
+// ---------- 3) Agendar a nombre de un paciente ----------
+// OJO con el trigger trg_validar_horario_cita de bd.sql: solo valida cuando la
+// cita trae sede_id. Por eso aquí la validación se hace en el endpoint contra la
+// tabla `horarios` y la sede se deduce de la franja del médico.
+app.post("/api/citas/admin", requireAuth, requireRole("recepcionista", "administrador"), validar(schemas.crearCitaAdmin), async (req, res) => {
+    try {
+        const { paciente_id, medico_id, sede_id, fecha, hora, motivo } = req.validated;
+        const horaSQL = `${hora}:00`;
+
+        const fechaCita = new Date(`${fecha}T${hora}:00${process.env.CLINIC_UTC_OFFSET || "-05:00"}`);
+        if (Number.isNaN(fechaCita.getTime()) || fechaCita <= new Date()) {
+            return res.status(400).json({ mensaje: "La fecha y hora deben ser futuras" });
+        }
+
+        const pacientes = await query("SELECT paciente_id FROM pacientes WHERE paciente_id = ?", [paciente_id]);
+        if (!pacientes.length) return res.status(404).json({ mensaje: "El paciente no existe" });
+
+        const medicos = await query("SELECT medico_id FROM medicos WHERE medico_id = ? AND activo = 1", [medico_id]);
+        if (!medicos.length) return res.status(404).json({ mensaje: "El médico seleccionado no existe o está inactivo" });
+
+        // La hora debe caer dentro de una franja activa del médico y alinearse con duracion_slot
+        // (con slots de 30 min: 08:00 y 08:30 son válidas, 08:10 no). dia_semana: 0 = domingo.
+        const franjas = await query(
+            `SELECT sede_id FROM horarios
+             WHERE medico_id = ? AND activo = 1
+               AND dia_semana = DAYOFWEEK(?) - 1
+               AND ? >= hora_inicio AND ? < hora_fin
+               AND MOD(TIME_TO_SEC(TIMEDIFF(?, hora_inicio)), duracion_slot * 60) = 0
+               AND (? IS NULL OR sede_id = ?)
+             LIMIT 1`,
+            [medico_id, fecha, horaSQL, horaSQL, horaSQL, sede_id ?? null, sede_id ?? null]
+        );
+        if (!franjas.length) {
+            return res.status(400).json({ mensaje: "El médico no atiende en ese día u hora" });
+        }
+        const sedeId = franjas[0].sede_id;
+
+        const conflictos = await query(
+            "SELECT cita_id FROM citas WHERE medico_id = ? AND fecha_cita = ? AND hora_cita = ? AND estado NOT IN ('Cancelada', 'No-Asistio')",
+            [medico_id, fecha, horaSQL]
+        );
+        if (conflictos.length) return res.status(409).json({ mensaje: "Ese horario ya está ocupado" });
+
+        // El trigger trg_crear_recordatorio ya crea el recordatorio de WhatsApp pendiente.
+        const cita = await query(
+            "INSERT INTO citas (paciente_id, medico_id, sede_id, fecha_cita, hora_cita, motivo) VALUES (?, ?, ?, ?, ?, ?)",
+            [paciente_id, medico_id, sedeId, fecha, horaSQL, motivo || null]
+        );
+
+        res.status(201).json({ mensaje: "Cita agendada correctamente", cita_id: cita.insertId });
+    } catch (error) {
+        if (error.sqlState === "45000") {
+            return res.status(400).json({ mensaje: error.sqlMessage || "El médico no atiende en ese horario" });
+        }
+        console.error("Error agendando cita (recepción):", error.message);
+        res.status(500).json({ mensaje: "No fue posible agendar la cita" });
+    }
+});
+
+async function pacienteIdDeUsuario(usuarioId) {
+    const users = await query(
+        "SELECT paciente_id FROM usuarios WHERE usuario_id = ? AND rol = 'paciente' AND activo = 1",
+        [usuarioId]
+    );
+    return users[0]?.paciente_id ?? null;
+}
+ 
+// ============================================================
+// PACIENTE: LISTA DE ESPERA
+// ============================================================
+ 
+// Entradas activas del paciente, con su posición en la cola de esa especialidad.
+// No se devuelven `observaciones` (son notas internas de recepción).
+app.get("/api/lista-espera/me", requireAuth, requireRole("paciente"), async (req, res) => {
+    try {
+        const pacienteId = await pacienteIdDeUsuario(req.user.id);
+        if (!pacienteId) return res.status(400).json({ mensaje: "El usuario no está asociado a un paciente" });
+ 
+        // posicion = 1 + cuántos activos de la misma especialidad van antes:
+        // mayor prioridad primero y, a igual prioridad, el que se inscribió antes.
+        const lista = await query(`
+            SELECT le.espera_id, le.especialidad_requerida, s.nombre AS sede, le.prioridad,
+                   DATE_FORMAT(le.fecha_inscripcion, '%Y-%m-%d %H:%i') AS fecha_inscripcion,
+                   1 + (
+                       SELECT COUNT(*) FROM lista_espera o
+                       WHERE o.estado_espera = 'Activo'
+                         AND o.especialidad_requerida <=> le.especialidad_requerida
+                         AND (
+                             FIELD(o.prioridad, 'Alta', 'Media', 'Baja') < FIELD(le.prioridad, 'Alta', 'Media', 'Baja')
+                             OR (o.prioridad = le.prioridad AND (
+                                 o.fecha_inscripcion < le.fecha_inscripcion
+                                 OR (o.fecha_inscripcion = le.fecha_inscripcion AND o.espera_id < le.espera_id)
+                             ))
+                         )
+                   ) AS posicion
+            FROM lista_espera le
+            LEFT JOIN sedes s ON s.sede_id = le.sede_id
+            WHERE le.paciente_id = ? AND le.estado_espera = 'Activo'
+            ORDER BY le.fecha_inscripcion DESC
+        `, [pacienteId]);
+ 
+        res.json({ lista_espera: lista });
+    } catch (error) {
+        console.error("Error consultando lista de espera del paciente:", error.message);
+        res.status(500).json({ mensaje: "No fue posible consultar la lista de espera" });
+    }
+});
+ 
+// El paciente se inscribe a una especialidad (prioridad Media; recepción puede subirla).
+app.post("/api/lista-espera/me", requireAuth, requireRole("paciente"), validar(schemas.inscribirListaEsperaPaciente), async (req, res) => {
+    try {
+        const { especialidad_requerida, sede_id, observaciones } = req.validated;
+ 
+        const pacienteId = await pacienteIdDeUsuario(req.user.id);
+        if (!pacienteId) return res.status(400).json({ mensaje: "El usuario no está asociado a un paciente" });
+ 
+        // Solo especialidades que existan (las especialidades salen de medicos.especialidad)
+        const especialidades = await query(
+            "SELECT 1 FROM medicos WHERE especialidad = ? AND activo = 1 LIMIT 1",
+            [especialidad_requerida]
+        );
+        if (!especialidades.length) return res.status(404).json({ mensaje: "La especialidad seleccionada no está disponible" });
+ 
+        if (sede_id !== undefined) {
+            const sedes = await query("SELECT sede_id FROM sedes WHERE sede_id = ? AND activa = 1", [sede_id]);
+            if (!sedes.length) return res.status(404).json({ mensaje: "La sede seleccionada no existe" });
+        }
+ 
+        const existente = await query(
+            "SELECT espera_id FROM lista_espera WHERE paciente_id = ? AND estado_espera = 'Activo' AND especialidad_requerida = ?",
+            [pacienteId, especialidad_requerida]
+        );
+        if (existente.length) return res.status(409).json({ mensaje: "Ya estás en la lista de espera de esa especialidad" });
+ 
+        const result = await query(
+            `INSERT INTO lista_espera (paciente_id, especialidad_requerida, sede_id, prioridad, estado_espera, observaciones)
+             VALUES (?, ?, ?, 'Media', 'Activo', ?)`,
+            [pacienteId, especialidad_requerida, sede_id ?? null, observaciones || null]
+        );
+ 
+        res.status(201).json({ mensaje: "Quedaste inscrito en la lista de espera", espera_id: result.insertId });
+    } catch (error) {
+        console.error("Error inscribiendo al paciente en lista de espera:", error.message);
+        res.status(500).json({ mensaje: "No fue posible inscribirte en la lista de espera" });
+    }
+});
+ 
+// Número para el KPI "En lista de espera" del dashboard (misma forma que /citas/:estado/count).
+app.get("/api/lista-espera/me/count", requireAuth, requireRole("paciente"), async (req, res) => {
+    try {
+        const pacienteId = await pacienteIdDeUsuario(req.user.id);
+        if (!pacienteId) return res.status(400).json({ mensaje: "El usuario no está asociado a un paciente" });
+ 
+        const result = await query(
+            "SELECT COUNT(*) AS total_espera FROM lista_espera WHERE paciente_id = ? AND estado_espera = 'Activo'",
+            [pacienteId]
+        );
+        res.json({ total_espera: result[0].total_espera });
+    } catch (error) {
+        console.error("Error contando lista de espera del paciente:", error.message);
+        res.status(500).json({ mensaje: "No fue posible consultar la lista de espera" });
+    }
+});
+ 
+// ============================================================
+// PACIENTE: CONFIRMAR CITA DESDE EL PORTAL
+// ============================================================
+app.put("/api/citas/:id/confirmar", requireAuth, requireRole("paciente"), async (req, res) => {
+    const citaId = Number(req.params.id);
+    if (!Number.isInteger(citaId) || citaId <= 0) return res.status(400).json({ mensaje: "Cita no válida" });
+ 
+    try {
+        const pacienteId = await pacienteIdDeUsuario(req.user.id);
+        if (!pacienteId) return res.status(400).json({ mensaje: "El usuario no está asociado a un paciente" });
+ 
+        // Se filtra por paciente_id para que nadie confirme citas ajenas cambiando el id en la URL.
+        const citas = await query(
+            `SELECT estado, DATE_FORMAT(fecha_cita, '%Y-%m-%d') AS fecha, TIME_FORMAT(hora_cita, '%H:%i') AS hora
+             FROM citas WHERE cita_id = ? AND paciente_id = ?`,
+            [citaId, pacienteId]
+        );
+        if (!citas.length) return res.status(404).json({ mensaje: "Cita no encontrada o no pertenece al paciente" });
+ 
+        const { estado, fecha, hora } = citas[0];
+        if (estado === "Confirmada") return res.status(409).json({ mensaje: "La cita ya está confirmada" });
+        if (estado !== "Pendiente") return res.status(409).json({ mensaje: "Solo se pueden confirmar citas pendientes" });
+ 
+        const fechaCita = new Date(`${fecha}T${hora}:00${process.env.CLINIC_UTC_OFFSET || "-05:00"}`);
+        if (Number.isNaN(fechaCita.getTime()) || fechaCita <= new Date()) {
+            return res.status(400).json({ mensaje: "No se puede confirmar una cita que ya pasó" });
+        }
+ 
+        // AND estado = 'Pendiente' evita pisar un cambio hecho en paralelo (cancelación, por ejemplo).
+        const resultado = await query(
+            "UPDATE citas SET estado = 'Confirmada' WHERE cita_id = ? AND paciente_id = ? AND estado = 'Pendiente'",
+            [citaId, pacienteId]
+        );
+        if (!resultado.affectedRows) return res.status(409).json({ mensaje: "La cita cambió de estado, actualiza la página" });
+ 
+        res.json({ mensaje: "Cita confirmada correctamente" });
+    } catch (error) {
+        console.error("Error confirmando cita:", error.message);
+        res.status(500).json({ mensaje: "No fue posible confirmar la cita" });
+    }
+});
+ 
+// ============================================================
+// CUALQUIER ROL: CAMBIAR CLAVE
+// ============================================================
+// Va bajo /auth/ a propósito: api() en app.js no redirige al login con un 401 en rutas /auth/.
+// authLimiter frena que alguien con un token robado adivine la clave actual.
+app.put("/api/auth/cambiar-clave", authLimiter, requireAuth, validar(schemas.cambiarClave), async (req, res) => {
+    try {
+        const { clave_actual, nueva_clave } = req.validated;
+ 
+        const users = await query("SELECT clave_hash FROM usuarios WHERE usuario_id = ? AND activo = 1", [req.user.id]);
+        if (!users.length) return res.status(404).json({ mensaje: "Usuario no encontrado" });
+ 
+        if (!verifyPassword(clave_actual, users[0].clave_hash)) {
+            return res.status(400).json({ mensaje: "La contraseña actual no es correcta" });
+        }
+ 
+        await query("UPDATE usuarios SET clave_hash = ? WHERE usuario_id = ?", [hashPassword(nueva_clave), req.user.id]);
+        // Si había enlaces de recuperación sin usar, dejan de servir.
+        await query("UPDATE tokens_recuperacion SET usado = 1 WHERE usuario_id = ? AND usado = 0", [req.user.id]);
+ 
+        res.json({ mensaje: "Contraseña actualizada correctamente" });
+    } catch (error) {
+        console.error("Error cambiando contraseña:", error.message);
+        res.status(500).json({ mensaje: "No fue posible cambiar la contraseña" });
+    }
+});
+ 
+// ============================================================
+// RECEPCIÓN / ADMIN: RECORDATORIOS
+// ============================================================
+ 
+// Listado paginado de recordatorios con los datos de la cita y del paciente.
+app.get("/api/recordatorios", requireAuth, requireRole("recepcionista", "administrador"), validarQuery(schemas.filtrosRecordatorios), async (req, res) => {
+    try {
+        const { estado, fecha, page, limit } = req.validatedQuery;
+        const offset = (page - 1) * limit;
+ 
+        let where = "WHERE 1 = 1";
+        const filtros = [];
+        if (estado) { where += " AND r.estado_entrega = ?"; filtros.push(estado); }
+        if (fecha) { where += " AND c.fecha_cita = ?"; filtros.push(fecha); }
+ 
+        const conteo = await query(
+            `SELECT COUNT(*) AS total FROM recordatorios r JOIN citas c ON c.cita_id = r.cita_id ${where}`,
+            filtros
+        );
+ 
+        const recordatorios = await query(`
+            SELECT r.recordatorio_id, r.cita_id, r.canal_envio, r.estado_entrega, r.intentos,
+                   r.respuesta_paciente,
+                   DATE_FORMAT(r.fecha_envio, '%Y-%m-%d %H:%i') AS fecha_envio,
+                   DATE_FORMAT(r.ultimo_intento, '%Y-%m-%d %H:%i') AS ultimo_intento,
+                   DATE_FORMAT(c.fecha_cita, '%Y-%m-%d') AS fecha,
+                   TIME_FORMAT(c.hora_cita, '%H:%i') AS hora,
+                   c.estado AS estado_cita,
+                   p.nombre_completo AS paciente, p.documento_id,
+                   m.nombre_completo AS medico
+            FROM recordatorios r
+            JOIN citas c ON c.cita_id = r.cita_id
+            JOIN pacientes p ON p.paciente_id = c.paciente_id
+            JOIN medicos m ON m.medico_id = c.medico_id
+            ${where}
+            ORDER BY c.fecha_cita DESC, c.hora_cita DESC
+            LIMIT ? OFFSET ?
+        `, [...filtros, limit, offset]);
+ 
+        res.json({ recordatorios, total: conteo[0].total, page, limit });
+    } catch (error) {
+        console.error("Error listando recordatorios:", error.message);
+        res.status(500).json({ mensaje: "No fue posible consultar los recordatorios" });
+    }
+});
+ 
+// IMPORTANTE: este endpoint NO envía el mensaje por sí mismo (server.js solo
+// arranca iniciarWhatsApp({ query }) y el envío vive en servicios/whatsapp.js). Lo que hace es
+// dejar el recordatorio otra vez "Pendiente" y con 0 intentos para que el proceso periódico
+// lo recoja. Si quieres envío inmediato hay que llamar desde aquí a la función de envío de whatsapp.js.
+app.post("/api/recordatorios/:cita_id/reenviar", requireAuth, requireRole("recepcionista", "administrador"), async (req, res) => {
+    const citaId = Number(req.params.cita_id);
+    if (!Number.isInteger(citaId) || citaId <= 0) return res.status(400).json({ mensaje: "Cita no válida" });
+ 
+    try {
+        const citas = await query(
+            `SELECT estado, DATE_FORMAT(fecha_cita, '%Y-%m-%d') AS fecha, TIME_FORMAT(hora_cita, '%H:%i') AS hora
+             FROM citas WHERE cita_id = ?`,
+            [citaId]
+        );
+        if (!citas.length) return res.status(404).json({ mensaje: "Cita no encontrada" });
+ 
+        const { estado, fecha, hora } = citas[0];
+        if (!["Pendiente", "Confirmada"].includes(estado)) {
+            return res.status(409).json({ mensaje: "Solo se reenvían recordatorios de citas pendientes o confirmadas" });
+        }
+ 
+        const fechaCita = new Date(`${fecha}T${hora}:00${process.env.CLINIC_UTC_OFFSET || "-05:00"}`);
+        if (Number.isNaN(fechaCita.getTime()) || fechaCita <= new Date()) {
+            return res.status(400).json({ mensaje: "La cita ya pasó, no tiene sentido reenviar el recordatorio" });
+        }
+ 
+        const actualizado = await query(
+            `UPDATE recordatorios
+             SET estado_entrega = 'Pendiente', intentos = 0, fecha_envio = NULL, ultimo_intento = NULL
+             WHERE cita_id = ?`,
+            [citaId]
+        );
+        // El trigger trg_crear_recordatorio normalmente ya creó la fila; por si faltara, se crea.
+        if (!actualizado.affectedRows) {
+            await query("INSERT INTO recordatorios (cita_id, canal_envio, estado_entrega) VALUES (?, 'WhatsApp', 'Pendiente')", [citaId]);
+        }
+        await query("UPDATE citas SET recordatorio_enviado = 0 WHERE cita_id = ?", [citaId]);
+ 
+        res.json({ mensaje: "Recordatorio programado para reenvío" });
+    } catch (error) {
+        console.error("Error reenviando recordatorio:", error.message);
+        res.status(500).json({ mensaje: "No fue posible reenviar el recordatorio" });
+    }
+});
