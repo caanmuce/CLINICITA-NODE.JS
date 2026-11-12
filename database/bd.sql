@@ -46,6 +46,7 @@ CREATE TABLE `medicos` (
   `usuario_id` int(11) DEFAULT NULL,
   `nombre_completo` varchar(100) NOT NULL,
   `especialidad` varchar(50) NOT NULL,
+  `tarifa` decimal(10,2) NOT NULL DEFAULT 50000.00,
   `correo_institucional` varchar(100) DEFAULT NULL,
   `activo` tinyint(1) NOT NULL DEFAULT 1,
   `fecha_creacion` timestamp NOT NULL DEFAULT current_timestamp(),

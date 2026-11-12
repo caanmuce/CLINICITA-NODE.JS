@@ -217,9 +217,12 @@ function refrescarCada(funcion, ms = 60000) {
 document.addEventListener("DOMContentLoaded", () => {
     // El orden importa: pintarSesion() crea el botón de logout en el navbar
     // y configurarLogout() lo busca para conectarle el clic, así que tiene
-    // que ir después
+    // que ir después.
+    if (document.getElementById("tabla-espera")) {
+        llenarEspecialidadesListaEspera();
+        cargarListaEspera();
+    }
 
-    cargarListaEspera();
     pintarSesion();
     configurarLogout();
 
@@ -283,6 +286,7 @@ document.addEventListener("DOMContentLoaded", () => {
         cargarAgendaMedico();
         refrescarCada(cargarAgendaMedico);
     }
+
 });
 
 async function cargarFormularioCita() {
