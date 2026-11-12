@@ -529,8 +529,7 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 function reprogramarCita(citaId) {
-    window.location.href = `agendar.html?reprogramar=${citaId}`;
-    //TODO: Crear el formulario de reprogramación de cita con html y que cargue la cita existente y permita cambiar fecha/hora.
+    window.location.href = `reprogramar.html?cita_id=${encodeURIComponent(citaId)}`;
 }
 
 
@@ -809,11 +808,11 @@ async function cargarCitasRecepcionista() {
 
             const estadoBadge = getEstadoBadge(cita.estado);
             fila.innerHTML = `
-                <td>${cita.fecha}</td>
-                <td>${cita.hora}</td>
-                <td>${cita.paciente} ${cita.documento_id ? `<br><small class="text-muted">${cita.documento_id}</small>` : ""}</td>
-                <td>${cita.medico}</td>
-                <td>${cita.especialidad || ""}</td>
+                <td>${escaparHTML(cita.fecha)}</td>
+                <td>${escaparHTML(cita.hora)}</td>
+                <td>${escaparHTML(cita.paciente)} ${cita.documento_id ? `<br><small class="text-muted">${escaparHTML(cita.documento_id)}</small>` : ""}</td>
+                <td>${escaparHTML(cita.medico)}</td>
+                <td>${escaparHTML(cita.especialidad) || ""}</td>
                 <td>${estadoBadge}</td>
                 <td>
                     <button class="btn btn-outline-clinicita btn-sm" data-accion="editar" data-cita-id="${cita.cita_id}" data-paciente-id="${cita.paciente_id}">
@@ -1092,11 +1091,17 @@ async function inicializarColoreoRiesgo(tbodyId) {
 // ============================================================
 // Escapa texto antes de meterlo en innerHTML (evita XSS con nombres/observaciones).
 function escaparHTML(valor) {
-    return String(valor ?? "").replace(/[&<>"']/g, (c) => (
-        { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+    return String(valor ?? "").replace(/[&<>"'`]/g, (c) => (
+        { 
+            "&": "&amp;", 
+            "<": "&lt;", 
+            ">": "&gt;", 
+            '"': "&quot;", 
+            "'": "&#x27;",
+            "`": "&#x60;"
+        }[c]
     ));
 }
-
 // El <select name="prioridad"> del HTML usa "alta"/"media"/"baja";
 // el backend usa "Alta" | "Media" | "Baja". ("normal" se deja como alias de media.)
 const PRIORIDAD_FORM_A_API = { alta: "Alta", media: "Media", normal: "Media", baja: "Baja" };
@@ -1142,7 +1147,9 @@ async function cargarListaEspera() {
         if (vacio) vacio.classList.toggle("d-none", lista_espera.length > 0);
 
         lista_espera.forEach((item, indice) => {
-            const id = Number(item.espera_id);
+            // Aseguramos el escape incluso si esperamos un ID numérico
+            const idEscapado = escaparHTML(String(item.espera_id ?? ""));
+            
             const fecha = item.fecha_inscripcion
                 ? new Date(item.fecha_inscripcion).toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" })
                 : "";
@@ -1160,21 +1167,24 @@ async function cargarListaEspera() {
                     ${item.observaciones ? `<br><small class="text-muted">${escaparHTML(item.observaciones)}</small>` : ""}
                 </td>
                 <td>
-                    <select class="form-select form-select-sm" data-espera-prioridad data-espera-id="${id}">
+                    <!-- idEscapado protege el atributo data-espera-id -->
+                    <select class="form-select form-select-sm" data-espera-prioridad data-espera-id="${idEscapado}">
                         ${["Alta", "Media", "Baja"].map((p) =>
-                            `<option value="${p}" ${p === item.prioridad ? "selected" : ""}>${PRIORIDAD_ETIQUETA[p]}</option>`
+
+                            `<option value="${p}" ${p === String(item.prioridad) ? "selected" : ""}>${PRIORIDAD_ETIQUETA[p] || p}</option>`
                         ).join("")}
                     </select>
                 </td>
                 <td>${escaparHTML(fecha)}</td>
                 <td class="text-nowrap">
-                    <button class="btn btn-outline-success btn-sm" data-accion="espera-asignar" data-espera-id="${id}" title="Marcar como asignado">
+                    <!-- idEscapado en todos los botones para evitar rotura de atributos -->
+                    <button class="btn btn-outline-success btn-sm" data-accion="espera-asignar" data-espera-id="${idEscapado}" title="Marcar como asignado">
                         <i class="bi bi-check-circle"></i>
                     </button>
-                    <button class="btn btn-outline-secondary btn-sm" data-accion="espera-expirar" data-espera-id="${id}" title="Marcar como expirado">
+                    <button class="btn btn-outline-secondary btn-sm" data-accion="espera-expirar" data-espera-id="${idEscapado}" title="Marcar como expirado">
                         <i class="bi bi-clock-history"></i>
                     </button>
-                    <button class="btn btn-outline-danger btn-sm" data-accion="espera-eliminar" data-espera-id="${id}" title="Eliminar">
+                    <button class="btn btn-outline-danger btn-sm" data-accion="espera-eliminar" data-espera-id="${idEscapado}" title="Eliminar">
                         <i class="bi bi-trash"></i>
                     </button>
                 </td>
@@ -1187,6 +1197,7 @@ async function cargarListaEspera() {
         mostrarAlerta(error.message, "danger");
     }
 }
+
 
 /**
  * Inscribe a un paciente (buscado por documento) en la lista de espera.
@@ -1291,4 +1302,39 @@ document.addEventListener("DOMContentLoaded", () => {
     // Al cambiar la fecha o el estado, la tabla se recarga sola
     filtros.querySelectorAll("select, input[type='date']").forEach((el) =>
         el.addEventListener("change", cargarCitasRecepcionista));
+});
+
+
+document.addEventListener("DOMContentLoaded", () => {
+    const fechaInput = document.querySelector('#filtro-fecha [name="fecha"]');
+    const btnFiltrar = document.querySelector('#filtro-fecha button[type="button"]');
+
+    // Establecer fecha por defecto a hoy
+    if (fechaInput && !fechaInput.value) {
+        const hoy = new Date();
+        const offset = hoy.getTimezoneOffset() * 60000;
+        const localDate = new Date(hoy.getTime() - offset).toISOString().split('T')[0];
+        fechaInput.value = localDate;
+    }
+
+    if (btnFiltrar) {
+        btnFiltrar.addEventListener("click", () => {
+            cargarAgendaMedico();
+        });
+    }
+
+    // También permitir Enter en el input de fecha
+    if (fechaInput) {
+        fechaInput.addEventListener("keypress", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                cargarAgendaMedico();
+            }
+        });
+    }
+
+    // Cargar agenda inicial si hay fecha
+    if (fechaInput && fechaInput.value) {
+        cargarAgendaMedico();
+    }
 });
