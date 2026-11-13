@@ -20,8 +20,8 @@ class MLClient {
             const resp = await this.client.get(`/riesgo/${pacienteId}`);
             return resp.data;
         } catch (error) {
-            if (error.code === 'ECONNREFUSED' || error.response?.status === 503) {
-                console.warn("[ML] Servicio no disponible, usando fallback heurístico");
+            if (error.code === "ECONNREFUSED" || [404, 503].includes(error.response?.status)) {
+                console.warn("[ML] Predicción no disponible, usando fallback heurístico");
                 return this.fallbackHeuristico(pacienteId);
             }
             console.error(`[ML] Error obteniendo riesgo para paciente ${pacienteId}:`, error.message);
@@ -53,16 +53,17 @@ class MLClient {
         const query = require("util").promisify(conexion.query).bind(conexion);
 
         try {
-            const [citas] = await query(`
+            const citas = await query(`
                 SELECT COUNT(*) as total,
                        SUM(CASE WHEN estado = 'No-Asistio' THEN 1 ELSE 0 END) as no_shows,
                        SUM(CASE WHEN estado = 'Cancelada' THEN 1 ELSE 0 END) as canceladas
                 FROM citas WHERE paciente_id = ?
             `, [pacienteId]);
 
-            const total = citas[0].total || 1;
-            const tasaNoShow = (citas[0].no_shows || 0) / total;
-            const tasaCancel = (citas[0].canceladas || 0) / total;
+            const resumen = citas[0] || {};
+            const total = Number(resumen.total) || 1;
+            const tasaNoShow = (Number(resumen.no_shows) || 0) / total;
+            const tasaCancel = (Number(resumen.canceladas) || 0) / total;
 
             // Score heurístico: 50% no-show rate + 30% cancel rate + 20% base
             const score = Math.min(100, Math.round((tasaNoShow * 50 + tasaCancel * 30 + 10) * 100) / 100);
