@@ -4,9 +4,9 @@
  * Maneja la sesión (token y usuario en localStorage), los formularios con
  * data-form y las llamadas a la API del servidor (server/server.js).
  *
- * ── Endpoints que el frontend usa hoy ─────────────────────────────────────
- *
- * Autenticación
+*
+* ── Endpoints que el frontend usa hoy ─────────────────────────────────────
+* Autenticación
  *   POST   /api/auth/login              Inicia sesión y devuelve token + usuario
  *   POST   /api/auth/registro           Registra un paciente nuevo
  *
@@ -249,7 +249,10 @@ document.addEventListener("DOMContentLoaded", () => {
     cargarCitasHero();
 
     // Página de agendar: carga especialidades y conecta los selects.
-    if (document.querySelector('[data-form="agendar"]')) cargarFormularioCita();
+    if (document.querySelector('[data-form="agendar"]')) { 
+        cargarFormularioCita()
+        cargarSedes();
+    };
 
     // Página de reprogramar: mismos selects que agendar, más el select con las citas del paciente.
     if (document.querySelector('[data-form="reprogramar"]')) {
@@ -361,6 +364,23 @@ async function cargarHorarios() {
             opcion.value = h;
             opcion.textContent = h;
             hora.appendChild(opcion);
+        });
+    } catch (error) {
+        mostrarAlerta(error.message, "danger");
+    }
+}
+async function cargarSedes() {
+    const select = document.getElementById("sede");
+    if (!select) return;
+
+    try {
+        const respuesta = await api("/sedes");
+        select.innerHTML = '<option value="">Automática (según el médico)</option>';
+        respuesta.sedes.forEach((sede) => {
+            const opcion = document.createElement("option");
+            opcion.value = sede.sede_id;
+            opcion.textContent = sede.nombre;
+            select.appendChild(opcion);
         });
     } catch (error) {
         mostrarAlerta(error.message, "danger");
@@ -541,7 +561,7 @@ const coloresEspecialidad = {}; // caché para que la misma especialidad siempre
 const paletaColores = [
     "#0D9488", // teal
     "#2563EB", // azul
-    "#D97706", // ámbar
+    "#D97706", // ámbarx
     "#DB2777", // rosa
     "#7C3AED", // violeta
     "#059669", // verde
