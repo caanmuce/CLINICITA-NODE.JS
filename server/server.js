@@ -692,17 +692,17 @@ const schemas = {
     // Admin: Especialidades (se gestionan vía medicos)
     // Admin: Sedes
     crearSede: z.object({
-        nombre: z.string().min(2).max(100),
-        direccion: z.string().min(5).max(255),
-        telefono: z.string().max(20).optional(),
+        nombre: z.string().trim().min(2).max(100),
+        direccion: z.string().trim().min(5).max(255),
+        telefono: z.string().trim().max(20).optional(),
         activa: z.boolean().optional()
     }),
     actualizarSede: z.object({
-        nombre: z.string().min(2).max(100).optional(),
-        direccion: z.string().min(5).max(255).optional(),
-        telefono: z.string().max(20).optional().nullable(),
+        nombre: z.string().trim().min(2).max(100).optional(),
+        direccion: z.string().trim().min(5).max(255).optional(),
+        telefono: z.string().trim().max(20).optional().nullable(),
         activa: z.boolean().optional()
-    }),
+}),
     // Admin: Horarios
     crearHorario: z.object({
         medico_id: z.number().int().positive(),
@@ -1070,10 +1070,13 @@ app.delete("/api/usuarios/:id", requireAuth, requireRole("administrador"), async
     }
 });
 
-// -------------------- ADMIN: SEDES --------------------
 app.get("/api/sedes", requireAuth, requireRole("administrador", "recepcionista", "medico", "paciente"), async (req, res) => {
     try {
-        const sedes = await query("SELECT sede_id, nombre, direccion, telefono, activa FROM sedes WHERE activa = 1 ORDER BY nombre");
+        // El administrador puede pedir también las inactivas con ?todas=1
+        const soloActivas = !(req.user.rol === "administrador" && req.query.todas === "1");
+        const sedes = await query(
+            `SELECT sede_id, nombre, direccion, telefono, activa FROM sedes ${soloActivas ? "WHERE activa = 1" : ""} ORDER BY nombre`
+        );
         res.json({ sedes });
     } catch (error) {
         console.error("Error listando sedes:", error.message);
@@ -1083,10 +1086,14 @@ app.get("/api/sedes", requireAuth, requireRole("administrador", "recepcionista",
 
 app.post("/api/sedes", requireAuth, requireRole("administrador"), validar(schemas.crearSede), async (req, res) => {
     try {
-        const { nombre, direccion, telefono, activa } = req.validated;
+        const { nombre, direccion, telefono, activa } = req.validated; // ya vienen sin espacios sobrantes
+
+        const existente = await query("SELECT sede_id FROM sedes WHERE LOWER(nombre) = LOWER(?)", [nombre]);
+        if (existente.length) return res.status(409).json({ mensaje: "Ya existe una sede con ese nombre" });
+
         const result = await query(
             "INSERT INTO sedes (nombre, direccion, telefono, activa) VALUES (?, ?, ?, ?)",
-            [nombre.trim(), direccion.trim(), telefono?.trim() || null, activa !== false ? 1 : 0]
+            [nombre, direccion, telefono || null, activa !== false ? 1 : 0]
         );
         res.status(201).json({ mensaje: "Sede creada correctamente", sede_id: result.insertId });
     } catch (error) {
