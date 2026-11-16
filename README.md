@@ -250,7 +250,26 @@ docker compose down -v
 docker compose up -d --build
 ```
 
-`docker compose down -v` elimina los volúmenes `mysql_data`, `mlflow_data` y `ml_models`; úsalo únicamente cuando quieras comenzar desde cero. Después de borrarlos debes ejecutar nuevamente el generador y el entrenamiento.
+`docker compose down -v` elimina los volúmenes `mysql_data`, `mlflow_data` y `whatsapp_auth`; úsalo únicamente cuando quieras comenzar desde cero. El modelo se mantiene en `private-models` y no se elimina con ese comando.
+
+### Despliegue en una VM con Docker
+
+El repositorio es público, por lo que el modelo entrenado y los datos reales de pacientes no deben subirse a GitHub. Antes de iniciar Compose, crea una carpeta privada `private-models` en la raíz y copia allí el archivo `no_show_model_*.pkl`. La carpeta está excluida por `.gitignore` y se monta como `/models` dentro del servicio ML.
+
+Para conservar la sesión de WhatsApp, Compose utiliza el volumen `whatsapp_auth`. Después de iniciar el backend, revisa sus logs y escanea el QR:
+
+```bash
+mkdir -p private-models
+cp /ruta/al/no_show_model_*.pkl private-models/
+docker compose up -d --build
+docker compose logs -f backend
+```
+
+La base actual debe transportarse como un respaldo privado, no dentro del repositorio:
+
+```bash
+docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" clinicitabd < backups/clinicitabd.sql
+```
 
 ### Configuración Docker
 
