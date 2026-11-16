@@ -130,16 +130,52 @@ CREATE TABLE `lista_espera` (
   `paciente_id` int(11) NOT NULL,
   `especialidad_requerida` varchar(50) DEFAULT NULL,
   `sede_id` int(11) DEFAULT NULL,
+  `medico_preferido_id` int(11) DEFAULT NULL,
+  `fecha_desde` date DEFAULT NULL,
+  `fecha_hasta` date DEFAULT NULL,
+  `franja_horaria` enum('Manana','Tarde','Cualquiera') NOT NULL DEFAULT 'Cualquiera',
   `fecha_inscripcion` timestamp NOT NULL DEFAULT current_timestamp(),
   `prioridad` enum('Alta','Media','Baja') DEFAULT 'Media',
-  `estado_espera` enum('Activo','Asignado','Expirado') DEFAULT 'Activo',
+  `estado_espera` enum('Activo','Ofertado','Asignado','Expirado','Cancelado') DEFAULT 'Activo',
   `observaciones` text DEFAULT NULL,
   PRIMARY KEY (`espera_id`),
   KEY `paciente_id` (`paciente_id`),
   KEY `fk_lista_espera_sede` (`sede_id`),
   KEY `idx_lista_espera_estado_prioridad` (`estado_espera`, `prioridad`, `fecha_inscripcion`),
   CONSTRAINT `lista_espera_ibfk_1` FOREIGN KEY (`paciente_id`) REFERENCES `pacientes` (`paciente_id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `fk_lista_espera_sede` FOREIGN KEY (`sede_id`) REFERENCES `sedes` (`sede_id`) ON DELETE SET NULL ON UPDATE CASCADE
+  CONSTRAINT `fk_lista_espera_sede` FOREIGN KEY (`sede_id`) REFERENCES `sedes` (`sede_id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_lista_espera_medico_preferido` FOREIGN KEY (`medico_preferido_id`) REFERENCES `medicos` (`medico_id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+-- Tabla `lista_espera_ofertas`
+-- --------------------------------------------------------
+CREATE TABLE `lista_espera_ofertas` (
+  `oferta_id` int(11) NOT NULL AUTO_INCREMENT,
+  `espera_id` int(11) NOT NULL,
+  `paciente_id` int(11) NOT NULL,
+  `medico_id` int(11) NOT NULL,
+  `sede_id` int(11) DEFAULT NULL,
+  `fecha_cita` date NOT NULL,
+  `hora_cita` time NOT NULL,
+  `especialidad` varchar(50) NOT NULL,
+  `estado` enum('Pendiente','Aceptada','Rechazada','Expirada','Cancelada') NOT NULL DEFAULT 'Pendiente',
+  `fecha_oferta` datetime NOT NULL DEFAULT current_timestamp(),
+  `vence_en` datetime NOT NULL,
+  `fecha_respuesta` datetime DEFAULT NULL,
+  `cita_id` int(11) DEFAULT NULL,
+  `slot_reservado` varchar(80) GENERATED ALWAYS AS (CASE WHEN `estado` = 'Pendiente' THEN concat(`medico_id`, '|', `fecha_cita`, '|', `hora_cita`) ELSE NULL END) STORED,
+  `espera_activa` int(11) GENERATED ALWAYS AS (CASE WHEN `estado` = 'Pendiente' THEN `espera_id` ELSE NULL END) STORED,
+  PRIMARY KEY (`oferta_id`),
+  UNIQUE KEY `uq_lista_espera_slot_activo` (`slot_reservado`),
+  UNIQUE KEY `uq_lista_espera_paciente_ofertado` (`espera_activa`),
+  KEY `idx_lista_espera_ofertas_vencimiento` (`estado`, `vence_en`),
+  KEY `idx_lista_espera_ofertas_paciente` (`paciente_id`, `estado`),
+  CONSTRAINT `fk_espera_oferta_espera` FOREIGN KEY (`espera_id`) REFERENCES `lista_espera` (`espera_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_espera_oferta_paciente` FOREIGN KEY (`paciente_id`) REFERENCES `pacientes` (`paciente_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_espera_oferta_medico` FOREIGN KEY (`medico_id`) REFERENCES `medicos` (`medico_id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_espera_oferta_sede` FOREIGN KEY (`sede_id`) REFERENCES `sedes` (`sede_id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_espera_oferta_cita` FOREIGN KEY (`cita_id`) REFERENCES `citas` (`cita_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- --------------------------------------------------------
@@ -253,19 +289,9 @@ ALTER TABLE `tokens_recuperacion` MODIFY `token_id` int(11) NOT NULL AUTO_INCREM
 --
 DELIMITER $$
 
--- Trigger 1: al completar una cita, marca como "Asignado" SOLO las
--- entradas de lista de espera que sigan Activas para ese paciente.
-CREATE TRIGGER trg_actualizar_lista_espera
-AFTER UPDATE ON citas
-FOR EACH ROW
-BEGIN
-    IF NEW.estado = 'Completada' AND OLD.estado <> 'Completada' THEN
-        UPDATE lista_espera
-        SET estado_espera = 'Asignado'
-        WHERE paciente_id = NEW.paciente_id
-          AND estado_espera = 'Activo';
-    END IF;
-END$$
+-- La lista de espera se actualiza desde el servicio de ofertas cuando se confirma
+-- una oferta específica. No se usa un trigger por paciente, porque una cita normal
+-- no debe cerrar otras solicitudes activas del mismo paciente.
 
 -- Trigger 2: crea el recordatorio de WhatsApp pendiente.
 CREATE TRIGGER trg_crear_recordatorio
@@ -312,6 +338,42 @@ BEGIN
 
     IF slot_count = 0 AND NEW.sede_id IS NOT NULL THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'El médico no tiene horario configurado para esta sede y día';
+    END IF;
+END$$
+
+-- Impide que un agendamiento normal tome un horario ofrecido temporalmente.
+CREATE TRIGGER trg_bloquear_cita_sobre_oferta
+BEFORE INSERT ON citas
+FOR EACH ROW
+BEGIN
+    IF NEW.estado NOT IN ('Cancelada', 'No-Asistio') AND EXISTS (
+        SELECT 1 FROM lista_espera_ofertas o
+        WHERE o.medico_id = NEW.medico_id
+          AND o.fecha_cita = NEW.fecha_cita
+          AND o.hora_cita = NEW.hora_cita
+          AND o.estado = 'Pendiente' AND o.vence_en > NOW()
+    ) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Horario reservado temporalmente por una oferta de lista de espera';
+    END IF;
+END$$
+
+CREATE TRIGGER trg_bloquear_actualizacion_cita_sobre_oferta
+BEFORE UPDATE ON citas
+FOR EACH ROW
+BEGIN
+    IF NEW.estado NOT IN ('Cancelada', 'No-Asistio')
+       AND (OLD.estado IN ('Cancelada', 'No-Asistio')
+            OR NEW.medico_id <> OLD.medico_id
+            OR NEW.fecha_cita <> OLD.fecha_cita
+            OR NEW.hora_cita <> OLD.hora_cita)
+       AND EXISTS (
+            SELECT 1 FROM lista_espera_ofertas o
+            WHERE o.medico_id = NEW.medico_id
+              AND o.fecha_cita = NEW.fecha_cita
+              AND o.hora_cita = NEW.hora_cita
+              AND o.estado = 'Pendiente' AND o.vence_en > NOW()
+       ) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Horario reservado temporalmente por una oferta de lista de espera';
     END IF;
 END$$
 

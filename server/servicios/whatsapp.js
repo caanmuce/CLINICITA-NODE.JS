@@ -2,7 +2,7 @@ const cron = require("node-cron");
 const fs = require("node:fs");
 const path = require("node:path");
 const { mlClient } = require("../services/ml-client");
-const { reasignarCupoListaEspera } = require("./espera");
+const { reasignarCupoListaEspera, procesarRespuestaOfertaWhatsApp } = require("./espera");
 const conversaciones = new Map();
 const CONVERSACION_TTL_MS = Number(process.env.WHATSAPP_CONVERSATION_TTL_MS) || 4 * 60 * 60 * 1000;
 const CLINIC_TIMEZONE = process.env.CLINIC_TIMEZONE || "America/Bogota";
@@ -186,7 +186,7 @@ async function obtenerCitaDelUltimoRecordatorio(query, telefono, lid) {
 
     const citas = await query(`
         SELECT c.cita_id, c.fecha_cita, c.hora_cita, c.estado, c.paciente_id,
-               c.medico_id, p.nombre_completo AS paciente, p.telefono_whatsapp,
+               c.medico_id, c.sede_id, p.nombre_completo AS paciente, p.telefono_whatsapp,
                p.whatsapp_lid, m.especialidad, r.fecha_envio
         FROM citas c
         JOIN pacientes p ON p.paciente_id = c.paciente_id
@@ -334,7 +334,7 @@ function limpiarBloqueosSession(authDir) {
     }
 }
 
-async function iniciarWhatsApp({ query }) {
+async function iniciarWhatsApp({ query, db }) {
     if (process.env.ENABLE_WHATSAPP !== "true") {
         console.log("WhatsApp desactivado. Usa ENABLE_WHATSAPP=true para activarlo.");
         return null;
@@ -452,7 +452,7 @@ async function iniciarWhatsApp({ query }) {
                 if (!consulta) return;
                 debugLog(`Mensaje recibido de: ${msg.from} Contenido: ${msg.body}`);
                 try {
-                    await procesarMensaje({ client, msg, consulta, query, clasificar: gemini?.clasificar, responder: gemini?.responder });
+                    await procesarMensaje({ client, msg, consulta, query, db, clasificar: gemini?.clasificar, responder: gemini?.responder });
                 } catch (error) {
                     console.error("Error procesando mensaje de WhatsApp:", error.message);
                     await msg.reply("Lo siento, ocurrió un error interno procesando tu solicitud. Escribe 0 para volver al menú principal.").catch(() => {});
@@ -510,7 +510,7 @@ async function obtenerCitasActivas(query, telefono) {
 
     const filas = await query(`
         SELECT c.cita_id, c.fecha_cita, c.hora_cita, c.estado, c.paciente_id,
-               c.medico_id, p.nombre_completo AS paciente, p.telefono_whatsapp,
+               c.medico_id, c.sede_id, p.nombre_completo AS paciente, p.telefono_whatsapp,
                p.whatsapp_lid, m.especialidad
         FROM citas c
         JOIN pacientes p ON p.paciente_id = c.paciente_id
@@ -612,11 +612,22 @@ async function mostrarMenuPrincipal(msg) {
 4. Salir`);
 }
 
-async function procesarMensaje({ client, msg, consulta, query, clasificar, responder }) {
+async function procesarMensaje({ client, msg, consulta, query, db, clasificar, responder }) {
     const lid = String(msg.from).endsWith("@lid") ? msg.from : null;
     const chatKey = lid || msg.from;
     const telefono = await obtenerTelefonoEntrante(client, msg);
     const contexto = obtenerConversacion(chatKey) || { paso: "menu_principal" };
+
+    // Las respuestas a ofertas de lista de espera se validan por paciente/oferta,
+    // sin depender de la autorización temporal de los recordatorios de citas.
+    if (db && /^(ACEPTAR|RECHAZAR)(?:\s+\d+)?$/i.test(consulta)) {
+        const respuestaOferta = await procesarRespuestaOfertaWhatsApp(db, telefono, consulta, client);
+        if (respuestaOferta.handled) {
+            await msg.reply(respuestaOferta.mensaje);
+            guardarConversacion(chatKey, { paso: "menu_principal" });
+            return;
+        }
+    }
 
     if (!(await puedeResponderEnPruebas(query, telefono, lid, consulta))) {
         debugLog(`[WhatsApp] Mensaje ignorado silenciosamente: el remitente ${chatKey} no recibió notificación previa de recordatorio.`);
@@ -659,7 +670,7 @@ async function procesarMensaje({ client, msg, consulta, query, clasificar, respo
                     await msg.reply("¡Cita confirmada exitosamente! Gracias por usar CliniCita.");
                 } else {
                     await query("UPDATE citas SET estado = 'Cancelada' WHERE cita_id = ?", [cita.cita_id]);
-                    await reasignarCupoListaEspera(query, cita, client);
+                    await reasignarCupoListaEspera(db, cita, client);
                     await msg.reply(`Hola ${cita.paciente}, tu cita fue cancelada correctamente.`);
                 }
                 guardarConversacion(chatKey, { paso: "menu_principal" });
@@ -808,7 +819,7 @@ async function procesarMensaje({ client, msg, consulta, query, clasificar, respo
 
         if (consulta === "2") {
             await query("UPDATE citas SET estado = 'Cancelada' WHERE cita_id = ?", [contexto.citaId]);
-            await reasignarCupoListaEspera(query, contexto.citaData, client);
+            await reasignarCupoListaEspera(db, contexto.citaData, client);
             guardarConversacion(chatKey, { paso: "menu_principal" });
             await msg.reply(`Hola ${contexto.citaData.paciente}, tu cita fue cancelada correctamente.`);
             await mostrarMenuPrincipal(msg);
