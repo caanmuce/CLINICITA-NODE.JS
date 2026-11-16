@@ -1,4 +1,5 @@
 const cron = require("node-cron");
+const axios = require("axios");
 const fs = require("node:fs");
 const path = require("node:path");
 const { mlClient } = require("../services/ml-client");
@@ -238,19 +239,36 @@ function esRespuestaAfirmativa(texto) {
 }
 
 async function crearClasificador() {
-    if (!process.env.GEMINI_API_KEY) {
-        console.warn("[Gemini] Deshabilitada: GEMINI_API_KEY está vacía");
+    if (!process.env.OMNIROUTE_API_KEY) {
+        console.warn("[OmniRoute] Deshabilitada: OMNIROUTE_API_KEY está vacía");
         return null;
     }
     try {
-        const { GoogleGenAI } = require("@google/genai");
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        const modelo = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
-        debugLog(`[Gemini] Habilitada con modelo ${modelo}`);
+        const baseURL = (process.env.OMNIROUTE_BASE_URL || "http://localhost:20128/v1").replace(/\/+$/, "");
+        const modelo = process.env.OMNIROUTE_MODEL || "combo-1";
+        const cliente = axios.create({
+            baseURL,
+            headers: {
+                Authorization: `Bearer ${process.env.OMNIROUTE_API_KEY}`,
+                "Content-Type": "application/json"
+            },
+            timeout: 60000
+        });
+        debugLog(`[OmniRoute] Habilitada con modelo ${modelo} y base URL ${baseURL}`);
+        const extraerTexto = (response) => {
+            const contenido = response?.data?.choices?.[0]?.message?.content;
+            if (Array.isArray(contenido)) {
+                return contenido.map((parte) => parte?.text || "").join("");
+            }
+            if (typeof contenido !== "string" || !contenido.trim()) {
+                throw new Error("OmniRoute devolvió una respuesta sin contenido");
+            }
+            return contenido;
+        };
         const normalizarClasificacion = (resultado) => {
             const intenciones = new Set(["CONFIRMAR", "CANCELAR", "SINTOMAS", "OTRO"]);
             if (!resultado || typeof resultado !== "object" || !intenciones.has(resultado.intencion)) {
-                throw new Error("Gemini devolvió una clasificación inválida");
+                throw new Error("OmniRoute devolvió una clasificación inválida");
             }
             return {
                 intencion: resultado.intencion,
@@ -261,45 +279,90 @@ async function crearClasificador() {
         };
         const clasificar = async (consulta) => {
             try {
-                debugLog(`[Gemini] Clasificando: "${consulta}"`);
-                const response = await ai.models.generateContent({
+                debugLog(`[OmniRoute] Clasificando: "${consulta}"`);
+                const response = await cliente.post("/chat/completions", {
                     model: modelo,
-                    contents: `Clasifica este mensaje de un paciente. Responde solo JSON válido con las claves intencion y sintomas_detalles. intencion debe ser CONFIRMAR, CANCELAR, SINTOMAS u OTRO. Mensaje: "${consulta}"`,
-                    config: {
-                        systemInstruction: "Eres un clasificador estricto. No diagnostiques, no recomiendes medicamentos y no escribas markdown."
-                    }
+                    messages: [
+                        {
+                            role: "system",
+                            content: "Eres un clasificador estricto. No diagnostiques, no recomiendes medicamentos y no escribas markdown."
+                        },
+                        {
+                            role: "user",
+                            content: `Clasifica este mensaje de un paciente. Responde solo JSON válido con las claves intencion y sintomas_detalles. intencion debe ser CONFIRMAR, CANCELAR, SINTOMAS u OTRO. Mensaje: "${consulta}"`
+                        }
+                    ]
                 });
-                const texto = typeof response.text === "function" ? response.text() : response.text;
-                const resultado = JSON.parse(String(texto).replace(/```json|```/gi, "").trim());
+                const resultado = JSON.parse(extraerTexto(response).replace(/```json|```/gi, "").trim());
                 const clasificacion = normalizarClasificacion(resultado);
-                debugLog(`[Gemini] Clasificación: ${clasificacion.intencion}`);
+                debugLog(`[OmniRoute] Clasificación: ${clasificacion.intencion}`);
                 return clasificacion;
             } catch (error) {
-                console.error(`[Gemini] Error clasificando: ${error.message}`);
+                console.error(`[OmniRoute] Error clasificando: ${error.message}`);
                 throw error;
             }
         };
-        const responder = async (consulta) => {
+        // Función que verifica si la consulta del usuario está dentro del dominio permitido
+        const esSolicitudPermitida = (texto) => {
+            const lowered = texto.toLowerCase();
+
+            // Filtro de rechazo estricto e inflexible: prohibiciones explícitas
+            const prohibidos = [
+                // 1. Recetas, prescripciones médicas o sugerencias de medicamentos
+                /receta\s+m[ée]dica|receta|prescripci[óo]n|medicamento|pastilla|dosis|f[áa]rmaco|tratamiento\s+m[ée]dico|diagn[óo]stico|sugerencia\s+de\s+medicamento|recomendar\s+pastillas|recetar|sintomatología\s+clínica/i,
+                // 2. Literatura, libros, reseñas o temas culturales
+                /libro|literatura|novela|reseña|cultura|poesía|autor|cuento|obra\s+literaria|historia\s+del\s+arte/i,
+                // 3. Cocina, entretenimiento, películas o trivialidades
+                /cocina|receta\s+de\s+cocina|cocinar|película|cine|entretenimiento|juego|trivialidad|chiste|música|serie|actor|actriz|famoso/i,
+                // 4. Programación, desarrollo de software u otros temas técnicos ajenos a la clínica
+                /programación|desarrollo\s+de\s+software|código|javascript|python|sql|html|css|bug|servidor|api|react|node|git|framework|algoritmo/i
+            ];
+
+            if (prohibidos.some((p) => p.test(lowered))) {
+                return false;
+            }
+
+            const patrones = [
+                /cita/, /agenda/, /horario/, /horarios/, /ubicaci[óo]n/, /admis[ií]on/, /registro/, /consulta/, /recepcionista/, /agendar/, /programar/, /cancelar cita/, /confirmar cita/, /reagendar/, /informaci[óo]n de la cl[íi]nica/, /clínica/, /clínicita/, /atención/, /administrativ[oa]/,
+                /^(hola|buenas|buenos días|buenas tardes|buenas noches|gracias|ayuda)\b/, /qu[ée] puedes hacer/, /c[óo]mo est[áa]s/, /paciente/, /m[ée]dico/, /doctor/, /s[íi]ntoma/, /preconsulta/
+            ];
+            return patrones.some((p) => p.test(lowered));
+        };
+
+        const mensajeRechazoEstandar = "Lo siento, no puedo cumplir con esta solicitud. Actúo exclusivamente como el asistente operativo y de gestión clínica para CliniCita. Mi dominio se restringe de forma estricta a: agendamiento de citas, horarios de atención, ubicaciones, procesos de admisión y guía administrativa básica de la clínica. Tengo prohibido absoluto procesar recetas, prescripciones médicas, sugerencias de medicamentos, literatura, libros, reseñas, temas culturales, cocina, entretenimiento, películas, trivialidades, programación, desarrollo de software u otros temas ajenos a la clínica. Por favor, recuerda mi rol exclusivo como asistente de citas de CliniCita y formula tu consulta dentro de este ámbito.";
+
+        const responder = async (consulta, citasActivas = []) => {
             try {
-                debugLog(`[Gemini] Generando respuesta: "${consulta}"`);
-                const response = await ai.models.generateContent({
+                // Verificar dominio permitido antes de generar respuesta
+                if (!esSolicitudPermitida(consulta)) {
+                    return mensajeRechazoEstandar;
+                }
+                debugLog(`[OmniRoute] Generando respuesta: "${consulta}"`);
+                const infoCitas = citasActivas && citasActivas.length > 0
+                    ? `\n\n[INFORMACIÓN DE CITAS ACTIVAS DEL PACIENTE]:\n` + citasActivas.map(c => `- Cita ID ${c.cita_id}: ${formatoCita(c)} (Estado: ${c.estado})`).join('\n')
+                    : `\n\n[INFORMACIÓN DE CITAS ACTIVAS]: El paciente no tiene citas activas actualmente.`;
+
+                const response = await cliente.post("/chat/completions", {
                     model: modelo,
-                    contents: consulta,
-                    config: {
-                        systemInstruction: "Eres un asistente virtual de una clínica. Responde con amabilidad y máximo dos párrafos. Informa sobre horarios de lunes a viernes de 8:00 a 17:00 y el uso del portal. Nunca des diagnósticos, interpretes exámenes ni recetes medicamentos."
-                    }
+                    messages: [
+                        {
+                            role: "system",
+                            content: "Eres el asistente operativo y de gestión clínica exclusivo para CliniCita. Tu dominio de respuesta se restringe estrictamente a: agendamiento de citas, horarios de atención, ubicaciones, procesos de admisión y guía administrativa básica de la clínica. Tienes prohibido absoluto procesar o responder a: 1. Recetas, prescripciones médicas o sugerencias de medicamentos. 2. Literatura, libros, reseñas o temas culturales. 3. Cocina, entretenimiento, películas o trivialidades. 4. Programación, desarrollo de software u otros temas técnicos ajenos a la clínica. Cuando se te proporcione información de citas activas del paciente, úsala para responder con precisión a sus preguntas sobre sus citas. Responde con amabilidad pero con firmeza y concisión (máximo dos párrafos)." + infoCitas
+                        },
+                        { role: "user", content: consulta }
+                    ]
                 });
-                const texto = typeof response.text === "function" ? response.text() : response.text;
-                debugLog("[Gemini] Respuesta generada correctamente");
+                const texto = extraerTexto(response);
+                debugLog("[OmniRoute] Respuesta generada correctamente");
                 return texto;
             } catch (error) {
-                console.error(`[Gemini] Error generando respuesta: ${error.message}`);
+                console.error(`[OmniRoute] Error generando respuesta: ${error.message}`);
                 throw error;
             }
         };
         return { clasificar, responder };
     } catch (error) {
-        console.error("[Gemini] No disponible; se usará el clasificador local:", error.message);
+        console.error("[OmniRoute] No disponible; se usará el clasificador local:", error.message);
         return null;
     }
 }
@@ -351,7 +414,9 @@ async function iniciarWhatsApp({ query }) {
         return null;
     }
 
-    const gemini = await crearClasificador();
+    const omniRoute = process.env.ENABLE_WHATSAPP_CHATBOT === "true"
+        ? await crearClasificador()
+        : null;
     programarLimpiezaConversaciones();
     let chromePath = process.env.PUPPETEER_EXECUTABLE_PATH;
     if (!chromePath) {
@@ -452,7 +517,7 @@ async function iniciarWhatsApp({ query }) {
                 if (!consulta) return;
                 debugLog(`Mensaje recibido de: ${msg.from} Contenido: ${msg.body}`);
                 try {
-                    await procesarMensaje({ client, msg, consulta, query, clasificar: gemini?.clasificar, responder: gemini?.responder });
+                    await procesarMensaje({ client, msg, consulta, query, clasificar: omniRoute?.clasificar, responder: omniRoute?.responder });
                 } catch (error) {
                     console.error("Error procesando mensaje de WhatsApp:", error.message);
                     await msg.reply("Lo siento, ocurrió un error interno procesando tu solicitud. Escribe 0 para volver al menú principal.").catch(() => {});
@@ -503,31 +568,38 @@ async function iniciarWhatsApp({ query }) {
     return null;
 }
 
-async function obtenerCitasActivas(query, telefono) {
-    const numero = limpiarTelefono(telefono.telefono);
-    const lid = telefono.lid;
+async function obtenerCitasActivas(query, telefonoObj) {
+    const telefono = telefonoObj?.telefono || telefonoObj;
+    const lid = telefonoObj?.lid;
+    const numero = limpiarTelefono(telefono);
     if (!numero && !lid) return [];
 
-    const filas = await query(`
-        SELECT c.cita_id, c.fecha_cita, c.hora_cita, c.estado, c.paciente_id,
-               c.medico_id, p.nombre_completo AS paciente, p.telefono_whatsapp,
-               p.whatsapp_lid, m.especialidad
-        FROM citas c
-        JOIN pacientes p ON p.paciente_id = c.paciente_id
-        JOIN medicos m ON m.medico_id = c.medico_id
-        WHERE c.estado IN ('Pendiente', 'Confirmada')
-        AND (TIMESTAMP(c.fecha_cita, c.hora_cita) >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
-            OR c.estado = 'Confirmada')
-        ORDER BY c.fecha_cita, c.hora_cita
-    `);
+    try {
+        const filas = await query(`
+            SELECT c.cita_id, c.fecha_cita, c.hora_cita, c.estado, c.paciente_id,
+                   c.medico_id, p.nombre_completo AS paciente, p.telefono_whatsapp,
+                   p.whatsapp_lid, m.especialidad
+            FROM citas c
+            JOIN pacientes p ON p.paciente_id = c.paciente_id
+            JOIN medicos m ON m.medico_id = c.medico_id
+            WHERE c.estado IN ('Pendiente', 'Confirmada')
+            ORDER BY c.fecha_cita, c.hora_cita
+        `);
 
-    if (lid) {
-        const citasPorLid = filas.filter((fila) => fila.whatsapp_lid === lid);
-        if (citasPorLid.length) return citasPorLid;
+        if (lid) {
+            const citasPorLid = filas.filter((fila) => fila.whatsapp_lid === lid);
+            if (citasPorLid.length) return citasPorLid;
+        }
+        if (!numero) return [];
+        const ultimosDigitos = numero.slice(-10);
+        return filas.filter((fila) => {
+            const telFila = limpiarTelefono(fila.telefono_whatsapp);
+            return telFila.slice(-10) === ultimosDigitos || telFila === numero;
+        });
+    } catch (error) {
+        console.error("[WhatsApp] Error obteniendo citas activas:", error.message);
+        return [];
     }
-    if (!numero) return [];
-    const ultimosDigitos = numero.slice(-10);
-    return filas.filter((fila) => limpiarTelefono(fila.telefono_whatsapp).slice(-10) === ultimosDigitos);
 }
 
 function seleccionarCita(citas, consulta) {
@@ -618,10 +690,7 @@ async function procesarMensaje({ client, msg, consulta, query, clasificar, respo
     const telefono = await obtenerTelefonoEntrante(client, msg);
     const contexto = obtenerConversacion(chatKey) || { paso: "menu_principal" };
 
-    if (!(await puedeResponderEnPruebas(query, telefono, lid, consulta))) {
-        debugLog(`[WhatsApp] Mensaje ignorado silenciosamente: el remitente ${chatKey} no recibió notificación previa de recordatorio.`);
-        return; // Ignorar el mensaje completamente y NO responder (sin msg.reply)
-    }
+    // Allow processing all messages; reminder validation is handled later where needed.
 
     if (/^vincular\b/i.test(consulta)) {
         const vinculacion = await vincularLid(query, lid || msg.from, consulta, telefono);
@@ -639,39 +708,58 @@ async function procesarMensaje({ client, msg, consulta, query, clasificar, respo
 
     if (contexto?.estado === "silencioso" && !/^(0|menu|salir|1|2|3|4)$/i.test(consulta)) return;
 
-    // Mantener compatibilidad con los recordatorios: el paciente puede
+    // Mantener compatibilidad con los recordatorios y comandos directos: el paciente puede
     // responder directamente CONFIRMAR o CANCELAR sin navegar el menú.
     if (!contexto.paso || contexto.paso === "menu_principal") {
         const intencionDirecta = clasificarLocal(consulta).intencion;
         if (intencionDirecta === "CONFIRMAR" || intencionDirecta === "CANCELAR") {
-            // Validar que el remitente sea exclusivamente el usuario al que se le envió el recordatorio
             const telRemitenteLimpio = limpiarTelefonoParaValidacion(telefono);
-            if (!telRemitenteLimpio || yaExpiroValidacion(telRemitenteLimpio) || !autorizacionesRecordatorio.has(telRemitenteLimpio)) {
-                debugLog(`[WhatsApp] Mensaje de recordatorio ignorado: el remitente ${telefono} no recibió la notificación previa o expiró.`);
-                return; // Ignorar el mensaje completamente y no responder
+            const autorizadoPorRecordatorio = telRemitenteLimpio && !yaExpiroValidacion(telRemitenteLimpio) && autorizacionesRecordatorio.has(telRemitenteLimpio);
+
+            let citaRecordatorio = null;
+            if (autorizadoPorRecordatorio) {
+                citaRecordatorio = await obtenerCitaDelUltimoRecordatorio(query, telefono, lid);
             }
 
-            const citaRecordatorio = await obtenerCitaDelUltimoRecordatorio(query, telefono, lid);
             if (citaRecordatorio) {
                 const cita = citaRecordatorio;
                 if (intencionDirecta === "CONFIRMAR") {
-                    await query("UPDATE citas SET estado = 'Confirmada' WHERE cita_id = ?", [cita.cita_id]);
+                    await query("UPDATE citas SET estado = 'Confirmada' WHERE cita_id = ? AND estado IN ('Pendiente', 'Confirmada')", [cita.cita_id]);
                     await msg.reply("¡Cita confirmada exitosamente! Gracias por usar CliniCita.");
                 } else {
-                    await query("UPDATE citas SET estado = 'Cancelada' WHERE cita_id = ?", [cita.cita_id]);
-                    await reasignarCupoListaEspera(query, cita, client);
-                    await msg.reply(`Hola ${cita.paciente}, tu cita fue cancelada correctamente.`);
+                    await query("UPDATE citas SET estado = 'Cancelada' WHERE cita_id = ? AND estado IN ('Pendiente', 'Confirmada')", [cita.cita_id]);
+                    await reasignarCupoListaEspera(query, cita, client).catch(err => console.error("[ListaEspera] Error en reasignación:", err.message));
+                    await msg.reply(`Hola ${cita.paciente || 'paciente'}, tu cita fue cancelada correctamente.`);
                 }
                 guardarConversacion(chatKey, { paso: "menu_principal" });
                 await mostrarMenuPrincipal(msg);
                 return;
             }
 
+            // Si no vino de recordatorio directo, buscar citas activas del paciente
             const citasActivas = await obtenerCitasActivas(query, { telefono, lid });
-            if (citasActivas.length > 1) {
+            if (citasActivas.length === 1) {
+                const cita = citasActivas[0];
+                if (intencionDirecta === "CONFIRMAR") {
+                    await query("UPDATE citas SET estado = 'Confirmada' WHERE cita_id = ? AND estado IN ('Pendiente', 'Confirmada')", [cita.cita_id]);
+                    await msg.reply(`¡Cita del ${formatoCita(cita)} confirmada exitosamente! Gracias por usar CliniCita.`);
+                } else {
+                    await query("UPDATE citas SET estado = 'Cancelada' WHERE cita_id = ? AND estado IN ('Pendiente', 'Confirmada')", [cita.cita_id]);
+                    await reasignarCupoListaEspera(query, cita, client).catch(err => console.error("[ListaEspera] Error en reasignación:", err.message));
+                    await msg.reply(`Hola ${cita.paciente || 'paciente'}, tu cita del ${formatoCita(cita)} fue cancelada correctamente.`);
+                }
+                guardarConversacion(chatKey, { paso: "menu_principal" });
+                await mostrarMenuPrincipal(msg);
+                return;
+            } else if (citasActivas.length > 1) {
                 guardarConversacion(chatKey, { paso: "menu_cita_seleccion", citasActivas, telefono, lid });
                 const textoCitas = citasActivas.map((c, i) => `${i + 1}. ${formatoCita(c)}`).join("\n");
-                await msg.reply(`Tienes varias citas activas. Responde con el número de la cita:\n${textoCitas}`);
+                await msg.reply(`Tienes varias citas activas. Responde con el número de la cita que deseas gestionar:\n${textoCitas}`);
+                return;
+            } else {
+                await msg.reply("No encontramos ninguna cita activa para confirmar o cancelar. Escribe 0 para ver el menú principal.");
+                guardarConversacion(chatKey, { paso: "menu_principal" });
+                await mostrarMenuPrincipal(msg);
                 return;
             }
         }
@@ -699,7 +787,11 @@ async function procesarMensaje({ client, msg, consulta, query, clasificar, respo
     // If user is in AI Agent mode
     if (contexto.paso === "ia_activo" || contexto.MODO_IA_ACTIVO) {
         if (responder) {
-            const respuesta = await responder(consulta).catch(() => null);
+            const citasActivas = await obtenerCitasActivas(query, { telefono, lid });
+            const respuesta = await responder(consulta, citasActivas).catch((err) => {
+                console.error("[WhatsApp] Error en llamada a LLM responder:", err.message);
+                return null;
+            });
             if (respuesta) await msg.reply(respuesta);
             else await msg.reply("Lo siento, en este momento no puedo procesar tu consulta. Escribe 0 para volver al menú principal.");
         } else {
@@ -745,6 +837,19 @@ async function procesarMensaje({ client, msg, consulta, query, clasificar, respo
         if (consulta === "4" || /^salir$/i.test(consulta)) {
             guardarConversacion(chatKey, { paso: "menu_principal", estado: "silencioso" });
             await msg.reply("Gracias por usar CliniCita. ¡Hasta pronto!");
+            return;
+        }
+
+        // Permitir consultas en lenguaje natural sin obligar al paciente a elegir "3".
+        // Los comandos numéricos siguen usando el menú tradicional.
+        if (responder && !/^\d+$/.test(consulta)) {
+            guardarConversacion(chatKey, { paso: "ia_activo", MODO_IA_ACTIVO: true });
+            const citasActivas = await obtenerCitasActivas(query, { telefono, lid });
+            const respuesta = await responder(consulta, citasActivas).catch((err) => {
+                console.error("[WhatsApp] Error en llamada a LLM responder:", err.message);
+                return null;
+            });
+            await msg.reply(respuesta || "Lo siento, en este momento no puedo procesar tu consulta. Escribe 0 para volver al menú principal.");
             return;
         }
 

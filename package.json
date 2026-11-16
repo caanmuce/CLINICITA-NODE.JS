@@ -14,7 +14,6 @@
     "check": "npm run lint && npm run format:check && npm test && npm run build"
   },
   "dependencies": {
-    "@google/genai": "^1.29.0",
     "axios": "^1.20.0",
     "cors": "^2.8.6",
     "dotenv": "^17.2.2",
@@ -37,7 +36,6 @@
   "allowScripts": {
     "node@26.8.2": true,
     "protobufjs@7.6.6": true,
-    "puppeteer@24.38.0": true,
-    "@google/genai@1.52.0": true
+    "puppeteer@24.38.0": true
   }
 }

@@ -11,7 +11,7 @@
 
 **Sistema web para el control y la gestión inteligente de citas médicas.**
 
-[Descripción](#descripción) · [Funcionalidades](#funcionalidades) · [Instalación](#instalación) · [Ejecución con Docker](#ejecución-con-docker) · [Uso](#uso) · [Estructura](#estructura-del-proyecto) · [ML No-Show Risk Score](#ml-no-show-risk-score-system) · [API](#api-disponible)
+[Descripción](#descripción) · [Funcionalidades](#funcionalidades) · [Instalación](#instalación) · [Ejecución con Docker](#ejecución-con-docker) · [Uso](#uso) · [Estructura](#estructura-del-proyecto) · [ML No-Show Risk Score](#ml-no-show-risk-score-system) · [API](#api-disponible) · [Cambios recientes](#cambios-recientes)
 
 </div>
 
@@ -19,7 +19,7 @@
 
 CliniCita es un proyecto formativo del **SENA** desarrollado para mejorar la administración de citas médicas y reducir el ausentismo. La plataforma centraliza el agendamiento, la consulta de citas, la atención por roles y los recordatorios para ofrecer una experiencia más ordenada a pacientes y personal de salud.
 
-El proyecto combina un frontend web responsive con un servidor **Node.js + Express**, una base de datos **MySQL**, una integración opcional con **WhatsApp**, y un **servicio de Machine Learning (FastAPI + XGBoost)** para predicción de riesgo de inasistencia (no-show). También incluye un chatbot con Google Gemini para clasificar mensajes relacionados con confirmaciones, cancelaciones y síntomas de preconsulta.
+El proyecto combina un frontend web responsive con un servidor **Node.js + Express**, una base de datos **MySQL**, una integración opcional con **WhatsApp**, y un **servicio de Machine Learning (FastAPI + XGBoost)** para predicción de riesgo de inasistencia (no-show). También incluye un chatbot con OmniRoute para clasificar mensajes relacionados con confirmaciones, cancelaciones y síntomas de preconsulta.
 
 ## Objetivos
 
@@ -69,7 +69,7 @@ El proyecto combina un frontend web responsive con un servidor **Node.js + Expre
 - Ejecución periódica de recordatorios con `node-cron`.
 - Vinculación de un WhatsApp ya identificado con el número registrado del paciente mediante documento y últimos cuatro dígitos del teléfono.
 - El chatbot solo responde al número registrado del paciente que tiene la cita; los mensajes de números no asociados se ignoran.
-- Clasificación local de mensajes y clasificación/respuesta opcional con Google Gemini.
+- Clasificación local de mensajes y clasificación/respuesta opcional mediante OmniRoute con el preset `combo-1`.
 - Ficha de preconsulta con síntomas o motivo reportado por el paciente.
 
 ### Machine Learning - No-Show Risk Score
@@ -92,7 +92,7 @@ El proyecto combina un frontend web responsive con un servidor **Node.js + Expre
 | Persistencia | MySQL 8.0, `mysql2` (Node), `pymysql` (Python) |
 | Autenticación | Tokens HMAC, `crypto.scryptSync` y control de acceso por rol |
 | Mensajería | `whatsapp-web.js`, `qrcode-terminal`, `node-cron` |
-| IA opcional | Google Gemini mediante `@google/genai` |
+| IA opcional | OmniRoute mediante API compatible con OpenAI |
 | Contenedores | Docker, Docker Compose |
 
 ## Requisitos
@@ -138,8 +138,9 @@ WHATSAPP_CONVERSATION_TTL_MS=14400000
 CLINIC_TIMEZONE=America/Bogota
 CLINIC_UTC_OFFSET=-05:00
 DEBUG=false
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash-lite
+OMNIROUTE_API_KEY=
+OMNIROUTE_BASE_URL=http://localhost:20128/v1
+OMNIROUTE_MODEL=combo-1
 # ML Service
 ML_SERVICE_URL=http://localhost:8000
 # Opcional: ruta de Chrome si no se encuentra automáticamente
@@ -264,7 +265,8 @@ Las variables se configuran en `.env`, creado a partir de `.env.docker.example`:
 | `MLFLOW_HOST_PORT` | Puerto público de MLflow | `5000` |
 | `MYSQL_HOST_PORT` | Puerto público de MySQL | `3307` |
 | `ENABLE_WHATSAPP` | Activa WhatsApp | `false` |
-| `GEMINI_API_KEY` | Clave opcional de Gemini | Vacía |
+| `OMNIROUTE_API_KEY` | Clave opcional de OmniRoute | Vacía |
+| `OMNIROUTE_BASE_URL` | Endpoint OpenAI-compatible de OmniRoute | `http://localhost:20128/v1` |
 
 El backend se conecta internamente a `http://ml-service:8000`; desde el navegador se usa `http://localhost:8000`. Por eso no se debe cambiar `ML_SERVICE_URL` a `localhost` dentro del contenedor backend.
 
@@ -300,7 +302,9 @@ El chatbot se activa por separado:
 ENABLE_WHATSAPP_CHATBOT=true
 ```
 
-La clave `GEMINI_API_KEY` es opcional. Si no está configurada, el sistema utiliza un clasificador local.
+`OMNIROUTE_API_KEY` es opcional. Si no está configurada, el sistema utiliza un clasificador local. Las peticiones usan el modelo/preset `combo-1`.
+
+Para pruebas locales, `DEVELOPER_MODE=true` permite agendar citas de médicos activos en cualquier día y hora futura, sin depender de los horarios configurados. No se activa cuando `NODE_ENV=production`; mantenlo en `false` fuera de entornos de desarrollo.
 
 ### Credenciales de demostración
 
@@ -706,6 +710,28 @@ ORDER BY FIELD(pr.nivel_riesgo, 'Crítico', 'Alto', 'Medio', 'Bajo');
 Abrir [http://localhost:5000](http://localhost:5000) → Experimento `clinicita-no-show-risk` → Último run → Ver métricas (AUC, feature_importance.csv artifact).
 
 ---
+
+## Cambios recientes
+
+### Migración de Gemini a OmniRoute
+- Se reemplazó la dependencia `@google/genai` (Google Gemini) por **OmniRoute**, un gateway compatible con la API de OpenAI.
+- Las variables de entorno cambiaron de `GEMINI_API_KEY` / `GEMINI_MODEL` a `OMNIROUTE_API_KEY` / `OMNIROUTE_BASE_URL` / `OMNIROUTE_MODEL`.
+- El clasificador y el respondedor del chatbot de WhatsApp ahora usan `axios` con el endpoint `/chat/completions` de OmniRoute, modelo/preset `combo-1`.
+- Se actualizaron `.env.example`, `.env.docker.example` y `docker-compose.yml` con las nuevas variables.
+
+### DEVELOPER_MODE para pruebas locales
+- Nueva variable `DEVELOPER_MODE=true` que permite agendar citas de médicos activos en cualquier día y hora futura, sin depender de los horarios registrados.
+- Solo se activa cuando `NODE_ENV` **no** es `production`.
+- Afecta los endpoints `GET /api/horarios` y `POST /api/citas/admin`, así como la función `franjaDelMedico`.
+
+### Mejoras en el chatbot de WhatsApp
+- El respondedor LLM (`responder`) ahora recibe las citas activas del paciente como contexto, permitiendo respuestas más informadas.
+- Cuando el paciente dice "confirmar" o "cancelar" y solo tiene una cita activa, se procesa directamente sin pedir selección.
+- Los mensajes en lenguaje natural desde el menú principal se redirigen automáticamente al agente de IA (sin obligar a elegir la opción "3").
+- Se mejoró el manejo de errores en las llamadas al LLM con logging adicional.
+
+### Datos de ejemplo ampliados
+- Se agregaron horarios de atención para el día **domingo** a todos los médicos de ejemplo en `database/bd.sql`.
 
 ## Estado del proyecto
 

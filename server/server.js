@@ -1,7 +1,10 @@
 console.log("=== SERVER.JS LOADING FROM:", __filename, "===");
 const express = require("express");
 const path = require("path");
-require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
+require("dotenv").config({
+    path: path.join(__dirname, "..", ".env"),
+    override: process.env.NODE_ENV !== "production"
+});
 const conexion = require("./conexion");
 const crypto = require("crypto");
 const { promisify } = require("util");
@@ -18,6 +21,11 @@ const query = promisify(conexion.query).bind(conexion);
 const ROLES = ["paciente", "medico", "recepcionista", "administrador"];
 const TOKEN_SECRET = process.env.TOKEN_SECRET || "clinicita-clave-local-cambiar-en-produccion";
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "http://localhost:8000";
+const DEVELOPER_MODE = process.env.NODE_ENV !== "production" && process.env.DEVELOPER_MODE === "true";
+
+if (DEVELOPER_MODE) {
+    console.warn("⚠️ DEVELOPER_MODE activo: los médicos podrán recibir citas a cualquier hora.");
+}
 
 // Validar TOKEN_SECRET en producción
 if (process.env.NODE_ENV === "production" && (!process.env.TOKEN_SECRET || process.env.TOKEN_SECRET === "clinicita-clave-local-cambiar-en-produccion")) {
@@ -444,15 +452,17 @@ app.get("/api/horarios", requireAuth, requireRole("paciente", "recepcionista", "
     }
 
     try {
-        const franjas = await query(
-            `SELECT TIME_FORMAT(hora_inicio, '%H:%i') AS inicio,
-                    TIME_FORMAT(hora_fin, '%H:%i') AS fin,
-                    duracion_slot
-             FROM horarios
-             WHERE medico_id = ? AND activo = 1 AND dia_semana = DAYOFWEEK(?) - 1
-             ORDER BY hora_inicio`,
-            [medico, fecha]
-        );
+        const franjas = DEVELOPER_MODE
+            ? [{ inicio: "00:00", fin: "24:00", duracion_slot: 1 }]
+            : await query(
+                `SELECT TIME_FORMAT(hora_inicio, '%H:%i') AS inicio,
+                        TIME_FORMAT(hora_fin, '%H:%i') AS fin,
+                        duracion_slot
+                 FROM horarios
+                 WHERE medico_id = ? AND activo = 1 AND dia_semana = DAYOFWEEK(?) - 1
+                 ORDER BY hora_inicio`,
+                [medico, fecha]
+            );
         const ocupadas = await query(
             `SELECT TIME_FORMAT(hora_cita, '%H:%i') AS hora
              FROM citas
@@ -486,6 +496,8 @@ app.get("/api/horarios", requireAuth, requireRole("paciente", "recepcionista", "
 // Devuelve la franja de atención (con su sede) que cubre esa hora, o null si el médico no atiende.
 // Es la misma regla que ya usa POST /api/citas/admin: dentro de una franja activa y alineada al slot.
 async function franjaDelMedico(medicoId, fecha, hora, sedeId = null) {
+    if (DEVELOPER_MODE) return { sede_id: null };
+
     const horaSQL = `${hora}:00`;
     const franjas = await query(
         `SELECT sede_id FROM horarios
@@ -1802,18 +1814,20 @@ app.post("/api/citas/admin", requireAuth, requireRole("recepcionista", "administ
         const medicos = await query("SELECT medico_id FROM medicos WHERE medico_id = ? AND activo = 1", [medico_id]);
         if (!medicos.length) return res.status(404).json({ mensaje: "El médico seleccionado no existe o está inactivo" });
 
-        // La hora debe caer dentro de una franja activa del médico y alinearse con duracion_slot
-        // (con slots de 30 min: 08:00 y 08:30 son válidas, 08:10 no). dia_semana: 0 = domingo.
-        const franjas = await query(
-            `SELECT sede_id FROM horarios
-             WHERE medico_id = ? AND activo = 1
-               AND dia_semana = DAYOFWEEK(?) - 1
-               AND ? >= hora_inicio AND ? < hora_fin
-               AND MOD(TIME_TO_SEC(TIMEDIFF(?, hora_inicio)), duracion_slot * 60) = 0
-               AND (? IS NULL OR sede_id = ?)
-             LIMIT 1`,
-            [medico_id, fecha, horaSQL, horaSQL, horaSQL, sede_id ?? null, sede_id ?? null]
-        );
+        // Fuera de desarrollo, la hora debe caer dentro de una franja activa
+        // y alinearse con la duración configurada del slot. dia_semana: 0 = domingo.
+        const franjas = DEVELOPER_MODE
+            ? [{ sede_id: null }]
+            : await query(
+                `SELECT sede_id FROM horarios
+                 WHERE medico_id = ? AND activo = 1
+                   AND dia_semana = DAYOFWEEK(?) - 1
+                   AND ? >= hora_inicio AND ? < hora_fin
+                   AND MOD(TIME_TO_SEC(TIMEDIFF(?, hora_inicio)), duracion_slot * 60) = 0
+                   AND (? IS NULL OR sede_id = ?)
+                 LIMIT 1`,
+                [medico_id, fecha, horaSQL, horaSQL, horaSQL, sede_id ?? null, sede_id ?? null]
+            );
         if (!franjas.length) {
             return res.status(400).json({ mensaje: "El médico no atiende en ese día u hora" });
         }

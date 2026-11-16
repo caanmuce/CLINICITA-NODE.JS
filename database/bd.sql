@@ -472,7 +472,7 @@ INSERT INTO pacientes (nombre_completo, documento_id, telefono_whatsapp, correo_
 ('María Torres', '1009876543', '3009876543', 'maria.torres@mail.com', 'Carrera 10 #20-45', '1985-08-22', 'F', 1),
 ('Carlos Ruiz', '1011121314', '3011121314', 'carlos.ruiz@mail.com', 'Av. 68 #40-50', '1992-03-10', 'M', 1);
 
--- Horarios de ejemplo (Lunes a Viernes 8:00-12:00 y 14:00-17:00, slots de 30 min)
+-- Horarios de ejemplo (Lunes a Viernes y Domingo, slots de 30 min)
 -- Dra. Laura Gómez (medico_id=1) - Sede Principal (sede_id=1)
 
 INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, duracion_slot, activo) VALUES
@@ -484,7 +484,8 @@ INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, dur
 (1, 1, 3, '14:00:00', '17:00:00', 30, 1), -- Miércoles tarde
 (1, 1, 4, '08:00:00', '12:00:00', 30, 1), -- Jueves mañana
 (1, 1, 4, '14:00:00', '17:00:00', 30, 1), -- Jueves tarde
-(1, 1, 5, '08:00:00', '12:00:00', 30, 1); -- Viernes mañana
+(1, 1, 5, '08:00:00', '12:00:00', 30, 1), -- Viernes mañana
+(1, 1, 0, '08:00:00', '12:00:00', 30, 1); -- Domingo mañana
 
 -- Dr. Andrés Rico (medico_id=2) - Sede Norte (sede_id=2)
 INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, duracion_slot, activo) VALUES
@@ -496,7 +497,8 @@ INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, dur
 (2, 2, 3, '14:00:00', '17:00:00', 30, 1),
 (2, 2, 4, '08:00:00', '12:00:00', 30, 1),
 (2, 2, 4, '14:00:00', '17:00:00', 30, 1),
-(2, 2, 5, '08:00:00', '12:00:00', 30, 1);
+(2, 2, 5, '08:00:00', '12:00:00', 30, 1),
+(2, 2, 0, '08:00:00', '12:00:00', 30, 1);
 
 -- Dra. María Torres (medico_id=3) - Sede Sur (sede_id=3)
 INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, duracion_slot, activo) VALUES
@@ -504,7 +506,8 @@ INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, dur
 (3, 3, 2, '08:00:00', '12:00:00', 30, 1),
 (3, 3, 3, '08:00:00', '12:00:00', 30, 1),
 (3, 3, 4, '08:00:00', '12:00:00', 30, 1),
-(3, 3, 5, '08:00:00', '12:00:00', 30, 1);
+(3, 3, 5, '08:00:00', '12:00:00', 30, 1),
+(3, 3, 0, '08:00:00', '12:00:00', 30, 1);
 
 -- Dr. Carlos Mendoza (medico_id=4) - Sede Principal (sede_id=1)
 INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, duracion_slot, activo) VALUES
@@ -517,7 +520,9 @@ INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, dur
 (4, 1, 4, '08:00:00', '12:00:00', 30, 1),
 (4, 1, 4, '14:00:00', '17:00:00', 30, 1),
 (4, 1, 5, '08:00:00', '12:00:00', 30, 1),
-(4, 1, 5, '14:00:00', '17:00:00', 30, 1);
+(4, 1, 5, '14:00:00', '17:00:00', 30, 1),
+(4, 1, 0, '08:00:00', '12:00:00', 30, 1),
+(4, 1, 0, '14:00:00', '17:00:00', 30, 1);
 
 -- Lista de espera de ejemplo
 INSERT INTO lista_espera (paciente_id, especialidad_requerida, sede_id, prioridad, estado_espera, observaciones) VALUES
