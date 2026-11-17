@@ -6,7 +6,7 @@
     "lint": "eslint server test_server.js public\\assets\\js",
     "format": "prettier --write package.json eslint.config.mjs",
     "format:check": "prettier --check package.json eslint.config.mjs",
-    "check:node": "node --check server\\server.js && node --check server\\conexion.js && node --check server\\services\\ml-client.js && node --check server\\servicios\\whatsapp.js && node --check test_server.js",
+    "check:node": "node --check server\\server.js && node --check server\\conexion.js && node --check server\\services\\ml-client.js && node --check server\\servicios\\whatsapp.js && node --check server\\servicios\\sms.js && node --check test_server.js",
     "check:python": "python -m py_compile ml-service\\app\\main.py ml-service\\app\\model\\predictor.py ml-service\\scripts\\generate_training_data.py ml-service\\train.py",
     "test": "npm run check:node && npm run check:python && npm run test:smoke",
     "test:smoke": "node test_server.js",

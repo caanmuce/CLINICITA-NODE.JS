@@ -143,6 +143,11 @@ OMNIROUTE_BASE_URL=http://localhost:20128/v1
 OMNIROUTE_MODEL=combo-1
 # ML Service
 ML_SERVICE_URL=http://localhost:8000
+# SMS (mock, android_gateway o twilio)
+SMS_PROVIDER=mock
+SMS_GATEWAY_URL=http://192.168.1.100:8080
+SMS_GATEWAY_USER=sms
+SMS_GATEWAY_PASSWORD=
 # Opcional: ruta de Chrome si no se encuentra automáticamente
 # PUPPETEER_EXECUTABLE_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
 ```
@@ -286,8 +291,14 @@ Las variables se configuran en `.env`, creado a partir de `.env.docker.example`:
 | `ENABLE_WHATSAPP` | Activa WhatsApp | `false` |
 | `OMNIROUTE_API_KEY` | Clave opcional de OmniRoute | Vacía |
 | `OMNIROUTE_BASE_URL` | Endpoint OpenAI-compatible de OmniRoute | `http://localhost:20128/v1` |
+| `SMS_PROVIDER` | Proveedor de SMS (`mock`, `android_gateway`, `twilio`) | `mock` |
+| `SMS_GATEWAY_URL` | URL del Android SMS Gateway | `http://192.168.1.100:8080` |
+| `SMS_GATEWAY_USER` | Usuario Basic Auth del gateway | `sms` |
+| `SMS_GATEWAY_PASSWORD` | Contraseña del gateway | Vacía |
 
 El backend se conecta internamente a `http://ml-service:8000`; desde el navegador se usa `http://localhost:8000`. Por eso no se debe cambiar `ML_SERVICE_URL` a `localhost` dentro del contenedor backend.
+
+Los SMS se envían únicamente para recordatorios de citas dentro de las próximas 24 horas cuyo riesgo sea `Alto` o `Crítico`. El proveedor `mock` solo registra el envío en logs; `android_gateway` usa `POST /message` con autenticación Basic y `twilio` requiere sus credenciales correspondientes.
 
 Para borrar también los datos persistidos y empezar desde cero:
 
@@ -441,6 +452,10 @@ Las rutas protegidas utilizan un token Bearer generado durante el inicio de sesi
 | `POST` | `/riesgo/batch` | Scores en lote (máx 100) |
 | `POST` | `/train` | Reentrenamiento en background |
 | `POST` | `/recalcular-todos` | Recalcula y guarda scores de todos los pacientes |
+
+El entrenamiento genera ejemplos a nivel de cita y calcula las variables históricas usando únicamente citas anteriores a la cita objetivo. Esto evita que el resultado de la propia cita se filtre en el entrenamiento. Las variables de contexto de inferencia (`antelacion_dias`, `hora_cita_num`, `dia_semana`, `especialidad` y `medico_id`) se toman de la próxima cita activa; si no existe, se usan valores por defecto.
+
+El cliente ML incorpora un Circuit Breaker local: después de tres fallos de red o HTTP 5xx abre durante 30 segundos y usa el fallback heurístico. Los errores 404 y 409 no abren el circuito.
 
 ## ML No-Show Risk Score System
 
@@ -700,6 +715,25 @@ curl -X POST http://localhost:3000/api/pacientes/riesgo/recalcular-todos \
    GROUP BY canal_envio, estado_entrega;
    ```
 
+#### 8.1. Verificar envío SMS
+
+Para probar sin enviar mensajes reales:
+
+```env
+SMS_PROVIDER=mock
+```
+
+Para Android SMS Gateway:
+
+```env
+SMS_PROVIDER=android_gateway
+SMS_GATEWAY_URL=http://<IP_DEL_GATEWAY>:8080
+SMS_GATEWAY_USER=sms
+SMS_GATEWAY_PASSWORD=<contraseña>
+```
+
+El bot mantiene el estado conversacional y las autorizaciones en `whatsapp_sesiones` con TTL. Las intenciones operativas aceptan sinónimos de confirmar, cancelar y reprogramar; las fechas relativas sin hora exacta solicitan únicamente la hora faltante.
+
 #### 9. Verificar BD - Scores persistidos
 
 ```sql
@@ -727,6 +761,14 @@ ORDER BY FIELD(pr.nivel_riesgo, 'Crítico', 'Alto', 'Medio', 'Bajo');
 #### 10. Verificar MLflow
 
 Abrir [http://localhost:5000](http://localhost:5000) → Experimento `clinicita-no-show-risk` → Último run → Ver métricas (AUC, feature_importance.csv artifact).
+
+### Pruebas rápidas
+
+```bash
+npm run check:node
+npm run check:python
+npm test
+```
 
 ---
 

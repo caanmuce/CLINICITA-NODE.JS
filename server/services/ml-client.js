@@ -6,6 +6,11 @@ const axios = require("axios");
 
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "http://localhost:8000";
 const ML_TIMEOUT = 5000;
+const CB_FAILURE_THRESHOLD = 3;
+const CB_COOLDOWN_MS = 30_000;
+const CB_CLOSED = "CLOSED";
+const CB_OPEN = "OPEN";
+const CB_HALF_OPEN = "HALF_OPEN";
 
 class MLClient {
     constructor() {
@@ -13,38 +18,83 @@ class MLClient {
             baseURL: ML_SERVICE_URL,
             timeout: ML_TIMEOUT
         });
+        this._cbState = CB_CLOSED;
+        this._cbFailures = 0;
+        this._cbOpenedAt = 0;
+        this._cbProbeInFlight = false;
+    }
+
+    _esFalloDeCircuito(error) {
+        const status = error.response?.status;
+        if (status === 404 || status === 409) return false;
+        if (status >= 500 && status <= 599) return true;
+        return !status && ["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN", "ERR_NETWORK", "ECONNABORTED", "ERR_CANCELED", "UND_ERR_CONNECT_TIMEOUT"].includes(error.code);
+    }
+
+    async _llamada(fn, fallback) {
+        if (this._cbState === CB_OPEN) {
+            if (Date.now() - this._cbOpenedAt < CB_COOLDOWN_MS) return fallback();
+            this._cbState = CB_HALF_OPEN;
+        }
+
+        if (this._cbState === CB_HALF_OPEN) {
+            if (this._cbProbeInFlight) return fallback();
+            this._cbProbeInFlight = true;
+        }
+
+        try {
+            const result = await fn();
+            this._cbFailures = 0;
+            this._cbState = CB_CLOSED;
+            return result;
+        } catch (error) {
+            if (this._esFalloDeCircuito(error)) {
+                this._cbFailures += 1;
+                if (this._cbState === CB_HALF_OPEN || this._cbFailures >= CB_FAILURE_THRESHOLD) {
+                    this._cbState = CB_OPEN;
+                    this._cbOpenedAt = Date.now();
+                    console.warn("[ML] Circuit Breaker OPEN durante 30 segundos");
+                }
+                return fallback();
+            }
+            if (this._cbState === CB_HALF_OPEN) {
+                this._cbState = CB_CLOSED;
+                this._cbFailures = 0;
+            }
+            throw error;
+        } finally {
+            this._cbProbeInFlight = false;
+        }
     }
 
     async getRiesgo(pacienteId) {
         try {
-            const resp = await this.client.get(`/riesgo/${pacienteId}`);
-            return resp.data;
+            return await this._llamada(async () => {
+                const resp = await this.client.get(`/riesgo/${pacienteId}`, { signal: AbortSignal.timeout(ML_TIMEOUT) });
+                return resp.data;
+            }, () => this.fallbackHeuristico(pacienteId));
         } catch (error) {
-            if (error.code === "ECONNREFUSED" || [404, 503].includes(error.response?.status)) {
-                console.warn("[ML] Predicción no disponible, usando fallback heurístico");
-                return this.fallbackHeuristico(pacienteId);
-            }
-            console.error(`[ML] Error obteniendo riesgo para paciente ${pacienteId}:`, error.message);
+            if (error.response?.status === 404) return this.fallbackHeuristico(pacienteId);
             throw error;
         }
     }
 
     async getRiesgoBatch(pacienteIds) {
-        try {
-            const resp = await this.client.post("/riesgo/batch", { paciente_ids: pacienteIds });
+        return this._llamada(async () => {
+            const resp = await this.client.post("/riesgo/batch", { paciente_ids: pacienteIds }, { signal: AbortSignal.timeout(ML_TIMEOUT) });
             return resp.data;
-        } catch (error) {
-            console.warn("[ML] Batch falló, usando fallback individual");
+        }, async () => {
+            console.warn("[ML] Batch no disponible, usando fallback individual");
             const results = [];
             for (const id of pacienteIds) {
                 try {
-                    results.push(await this.getRiesgo(id));
-                } catch (e) {
+                    results.push(await this.fallbackHeuristico(id));
+                } catch (error) {
                     results.push(this._fallbackDefault(id));
                 }
             }
             return results;
-        }
+        });
     }
 
     // Fallback heurístico simple si ML no está disponible
@@ -97,13 +147,15 @@ class MLClient {
 
     // Iniciar recálculo masivo de scores en el servicio ML
     async recalcularTodos() {
-        try {
-            const resp = await this.client.post("/recalcular-todos");
+        return this._llamada(async () => {
+            const resp = await this.client.post("/recalcular-todos", null, { signal: AbortSignal.timeout(ML_TIMEOUT) });
             return resp.data;
-        } catch (error) {
+        }, () => {
+            throw new Error("Servicio ML temporalmente no disponible; recálculo masivo omitido por Circuit Breaker");
+        }).catch((error) => {
             console.error("[ML] Error iniciando recálculo masivo:", error.message);
             throw error;
-        }
+        });
     }
 }
 

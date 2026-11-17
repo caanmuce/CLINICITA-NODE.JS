@@ -23,46 +23,30 @@ class ModelTrainer:
         self.mlflow_uri = mlflow_uri or os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
         mlflow.set_tracking_uri(self.mlflow_uri)
         mlflow.set_experiment("clinicita-no-show-risk")
+        self.feature_encoders = {}
 
     def prepare_training_data(self) -> Tuple[pd.DataFrame, pd.Series, pd.Series]:
         """Prepara X, y para entrenamiento"""
         logger.info("Construyendo features para entrenamiento...")
-        features_df = self.feature_builder.build_features()
+        features_df = self.feature_builder.build_training_dataset()
 
         if features_df.empty:
             raise ValueError("No hay datos para entrenar")
 
-        # Target: predecir riesgo de No-Asistio basado en historial reciente
-        # target = 1 si el paciente tuvo al menos 1 No-Asistio en los últimos 90 días
-        # (proxy simple y efectivo para riesgo alto; en producción se usaría ventana temporal)
-        target_query = """
-        SELECT paciente_id,
-               CAST(CASE WHEN SUM(CASE WHEN estado = 'No-Asistio' THEN 1 ELSE 0 END) > 0 THEN 1 ELSE 0 END AS UNSIGNED) AS target
-        FROM citas
-        WHERE fecha_cita >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
-        GROUP BY paciente_id
-        """
-
-        import pymysql
-        with self.db_pool.get_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(target_query)
-                targets = pd.DataFrame(cursor.fetchall())
-
-        # Merge features + target
-        data = features_df.merge(targets[['paciente_id', 'target']], on='paciente_id', how='left')
-
-        data['target'] = pd.to_numeric(data['target'], errors='coerce').fillna(0).astype(int)  # Sin próxima cita = 0
+        data = features_df.copy()
+        data['target'] = pd.to_numeric(data['target'], errors='coerce').fillna(0).astype(int)
 
         # Preparar X, y
         exclude_cols = ['paciente_id', 'target', 'genero']
-        cat_cols = ['genero']
+        cat_cols = ['especialidad']
 
         # Encode categóricos
         for col in cat_cols:
             if col in data.columns:
-                le = LabelEncoder()
-                data[col] = le.fit_transform(data[col].astype(str))
+                values = sorted(data[col].fillna('Desconocida').astype(str).unique())
+                encoder = {value: index for index, value in enumerate(values)}
+                self.feature_encoders[col] = encoder
+                data[col] = data[col].fillna('Desconocida').astype(str).map(encoder).fillna(-1)
 
         X = data.drop(columns=[c for c in exclude_cols if c in data.columns])
         y = data['target']
@@ -134,7 +118,8 @@ class ModelTrainer:
             run_id = run.info.run_id
 
         # Guardar localmente para serving rápido
-        model_dir = "/models"
+        from ..config import settings
+        model_dir = settings.model_dir
         os.makedirs(model_dir, exist_ok=True)
         model_path = os.path.join(model_dir, f"no_show_model_{run_id}.pkl")
 
@@ -144,7 +129,8 @@ class ModelTrainer:
             'run_id': run_id,
             'auc': auc,
             'params': final_params,
-            'trained_at': datetime.now().isoformat()
+            'trained_at': datetime.now().isoformat(),
+            'feature_encoders': self.feature_encoders
         }, model_path)
 
         logger.info(f"Modelo guardado en: {model_path}")

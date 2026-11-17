@@ -148,7 +148,7 @@ CREATE TABLE `lista_espera` (
 CREATE TABLE `recordatorios` (
   `recordatorio_id` int(11) NOT NULL AUTO_INCREMENT,
   `cita_id` int(11) NOT NULL,
-  `canal_envio` enum('WhatsApp','SMS','Email') DEFAULT 'WhatsApp',
+  `canal_envio` enum('WhatsApp','SMS','Email','WhatsApp+SMS') DEFAULT 'WhatsApp',
   `fecha_envio` datetime DEFAULT NULL,
   `estado_entrega` enum('Pendiente','Enviado','Entregado','Fallido') DEFAULT 'Pendiente',
   `respuesta_paciente` tinyint(1) DEFAULT NULL,
@@ -190,6 +190,19 @@ CREATE TABLE `tokens_recuperacion` (
   KEY `fk_tokens_usuario` (`usuario_id`),
   KEY `idx_tokens_expira` (`expira_en`),
   CONSTRAINT `fk_tokens_usuario` FOREIGN KEY (`usuario_id`) REFERENCES `usuarios` (`usuario_id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+-- Tabla `whatsapp_sesiones` (estado persistente de conversaciones y autorizaciones)
+-- --------------------------------------------------------
+CREATE TABLE `whatsapp_sesiones` (
+  `chat_id` varchar(255) NOT NULL,
+  `tipo` enum('conversacion','autorizacion') NOT NULL,
+  `payload` json NOT NULL,
+  `expira_en` datetime NOT NULL,
+  `actualizado_en` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`chat_id`),
+  KEY `idx_whatsapp_sesiones_expira` (`expira_en`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- --------------------------------------------------------
@@ -534,3 +547,24 @@ INSERT INTO lista_espera (paciente_id, especialidad_requerida, sede_id, priorida
   SELECT COUNT(*) FROM medicos;
   SELECT COUNT(*) FROM sedes;
   select * from lista_espera;
+
+-- --------------------------------------------------------
+-- Migración idempotente: crear sesiones persistentes de WhatsApp en bases existentes
+CREATE TABLE IF NOT EXISTS `whatsapp_sesiones` (
+  `chat_id` varchar(255) NOT NULL,
+  `tipo` enum('conversacion','autorizacion') NOT NULL,
+  `payload` json NOT NULL,
+  `expira_en` datetime NOT NULL,
+  `actualizado_en` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`chat_id`),
+  KEY `idx_whatsapp_sesiones_expira` (`expira_en`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Migración: ampliar ENUM canal_envio en recordatorios
+-- Ejecutar en bases de datos ya desplegadas que aún tengan
+-- el ENUM original ('WhatsApp','SMS','Email').
+-- --------------------------------------------------------
+ALTER TABLE recordatorios
+  MODIFY COLUMN canal_envio
+    ENUM('WhatsApp','SMS','Email','WhatsApp+SMS')
+    DEFAULT 'WhatsApp';

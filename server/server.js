@@ -237,6 +237,16 @@ async function initializeAuth() {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
     await query(`
+        CREATE TABLE IF NOT EXISTS whatsapp_sesiones (
+            chat_id VARCHAR(255) NOT NULL PRIMARY KEY,
+            tipo ENUM('conversacion', 'autorizacion') NOT NULL,
+            payload JSON NOT NULL,
+            expira_en DATETIME NOT NULL,
+            actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            KEY idx_whatsapp_sesiones_expira (expira_en)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    await query(`
         CREATE TABLE IF NOT EXISTS recordatorios (
             recordatorio_id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
             cita_id INT NOT NULL,
