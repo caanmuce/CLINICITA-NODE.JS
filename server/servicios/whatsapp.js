@@ -3,8 +3,9 @@ const axios = require("axios");
 const fs = require("node:fs");
 const path = require("node:path");
 const { mlClient } = require("../services/ml-client");
-const { reasignarCupoListaEspera } = require("./espera");
+const { reasignarCupoListaEspera, procesarRespuestaOfertaWhatsApp } = require("./espera");
 const { enviarSMS } = require("./sms");
+const conexion = require("../conexion");
 const CONVERSACION_TTL_MS = Number(process.env.WHATSAPP_CONVERSATION_TTL_MS) || 4 * 60 * 60 * 1000;
 const CLINIC_TIMEZONE = process.env.CLINIC_TIMEZONE || "America/Bogota";
 const CLINIC_UTC_OFFSET = process.env.CLINIC_UTC_OFFSET || "-05:00";
@@ -518,7 +519,7 @@ function limpiarBloqueosSession(authDir) {
     }
 }
 
-async function iniciarWhatsApp({ query }) {
+async function iniciarWhatsApp({ query, db = conexion }) {
     if (process.env.ENABLE_WHATSAPP !== "true") {
         console.log("WhatsApp desactivado. Usa ENABLE_WHATSAPP=true para activarlo.");
         return null;
@@ -647,7 +648,7 @@ async function iniciarWhatsApp({ query }) {
                             return;
                         }
                     }
-                    await procesarMensaje({ client, msg, consulta, query, clasificar: omniRoute?.clasificar, responder: omniRoute?.responder, extraerFechaHora: omniRoute?.extraerFechaHora });
+                    await procesarMensaje({ client, msg, consulta, query, db, clasificar: omniRoute?.clasificar, responder: omniRoute?.responder, extraerFechaHora: omniRoute?.extraerFechaHora });
                 } catch (error) {
                     console.error("Error procesando mensaje de WhatsApp:", error.message);
                     await msg.reply("Lo siento, ocurrió un error interno procesando tu solicitud. Escribe 0 para volver al menú principal.").catch(() => {});
@@ -995,7 +996,7 @@ async function ejecutarReprogramacionCita({ query, client, msg, chatKey, cita, f
     );
 
     if (resReprog.affectedRows > 0) {
-        await reasignarCupoListaEspera(query, cita, client).catch(err => console.error("[ListaEspera] Error en reasignación:", err.message));
+        await reasignarCupoListaEspera(conexion, cita, client).catch(err => console.error("[ListaEspera] Error en reasignación:", err.message));
         await msg.reply(`¡Cita reprogramada exitosamente para el ${fechaStr} a las ${horaNorm}!`);
         await guardarConversacion(query, chatKey, { paso: "menu_principal" });
         await mostrarMenuPrincipal(msg);
@@ -1080,7 +1081,7 @@ async function operarCancelacion({ query, telefono, lid, chatKey, consulta, msg,
     await query("UPDATE recordatorios SET respuesta_paciente = 0, estado_entrega = 'Entregado' WHERE cita_id = ?", [cita.cita_id]);
 
     if (res.affectedRows > 0) {
-        await reasignarCupoListaEspera(query, cita, client).catch(err => console.error("[ListaEspera] Error en reasignación:", err.message));
+        await reasignarCupoListaEspera(conexion, cita, client).catch(err => console.error("[ListaEspera] Error en reasignación:", err.message));
         await msg.reply(`Hola ${cita.paciente || "paciente"}, tu cita del ${formatoCita(cita)} ha sido cancelada correctamente en el sistema.`);
     } else {
         await msg.reply("La cita no se pudo cancelar o ya se encuentra cancelada.");
@@ -1338,7 +1339,7 @@ async function manejarPasoSeleccionAccion({ consulta, contexto, query, client, m
         const res = await query("UPDATE citas SET estado = 'Cancelada' WHERE cita_id = ? AND estado IN ('Pendiente', 'Confirmada')", [cita.cita_id]);
         await query("UPDATE recordatorios SET respuesta_paciente = 0, estado_entrega = 'Entregado' WHERE cita_id = ?", [cita.cita_id]);
         if (res.affectedRows > 0) {
-            await reasignarCupoListaEspera(query, cita, client).catch(err => console.error("[ListaEspera] Error en reasignación:", err.message));
+            await reasignarCupoListaEspera(conexion, cita, client).catch(err => console.error("[ListaEspera] Error en reasignación:", err.message));
             await msg.reply(`Hola ${cita.paciente || "paciente"}, tu cita del ${formatoCita(cita)} ha sido cancelada correctamente en el sistema.`);
         } else {
             await msg.reply("La cita no se pudo cancelar o ya se encuentra cancelada.");
@@ -1377,11 +1378,20 @@ async function mostrarMenuPrincipal(msg) {
 4. Salir`);
 }
 
-async function procesarMensaje({ client, msg, consulta, query, clasificar, responder, extraerFechaHora }) {
+async function procesarMensaje({ client, msg, consulta, query, db = conexion, clasificar, responder, extraerFechaHora }) {
     const lid = String(msg.from).endsWith("@lid") ? msg.from : null;
     const chatKey = lid || msg.from;
     const telefono = await obtenerTelefonoEntrante(client, msg);
     const contexto = await obtenerConversacion(query, chatKey) || { paso: "menu_principal" };
+
+    if (/^(ACEPTAR|RECHAZAR)(?:\s+\d+)?$/i.test(consulta)) {
+        const respuestaOferta = await procesarRespuestaOfertaWhatsApp(db, telefono, consulta, client);
+        if (respuestaOferta.handled) {
+            await msg.reply(respuestaOferta.mensaje);
+            await guardarConversacion(query, chatKey, { paso: "menu_principal" });
+            return;
+        }
+    }
 
     // Allow processing all messages; reminder validation is handled later where needed.
 
@@ -1558,7 +1568,7 @@ async function procesarMensaje({ client, msg, consulta, query, clasificar, respo
         if (consulta === "2") {
             await query("UPDATE citas SET estado = 'Cancelada' WHERE cita_id = ?", [contexto.citaId]);
             await query("UPDATE recordatorios SET respuesta_paciente = 0, estado_entrega = 'Entregado' WHERE cita_id = ?", [contexto.citaId]);
-            await reasignarCupoListaEspera(query, contexto.citaData, client);
+            await reasignarCupoListaEspera(conexion, contexto.citaData, client);
             await guardarConversacion(query, chatKey, { paso: "menu_principal" });
             await msg.reply(`Hola ${contexto.citaData.paciente}, tu cita fue cancelada correctamente.`);
             await mostrarMenuPrincipal(msg);

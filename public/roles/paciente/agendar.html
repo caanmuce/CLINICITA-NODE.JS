@@ -74,6 +74,35 @@
                         </div>
                         <button type="submit" class="btn btn-clinicita mt-3">Solicitar cita</button>
                     </form>
+                    <div id="panel-lista-espera-agendar" class="border rounded-3 p-3 mt-4 d-none">
+                        <h2 class="h6 mb-2"><i class="bi bi-hourglass-split me-2"></i>¿Quieres entrar a la lista de espera?</h2>
+                        <p class="small text-muted">Te avisaremos cuando se libere un turno que coincida con tus preferencias. No se creará una cita hasta que aceptes una oferta.</p>
+                        <div class="row g-2">
+                            <div class="col-md-3">
+                                <label for="espera-fecha-desde" class="form-label small">Desde</label>
+                                <input type="date" class="form-control" id="espera-fecha-desde">
+                            </div>
+                            <div class="col-md-3">
+                                <label for="espera-fecha-hasta" class="form-label small">Hasta</label>
+                                <input type="date" class="form-control" id="espera-fecha-hasta">
+                            </div>
+                            <div class="col-md-3">
+                                <label for="espera-franja" class="form-label small">Horario preferido</label>
+                                <select class="form-select" id="espera-franja">
+                                    <option value="Cualquiera">Cualquiera</option>
+                                    <option value="Manana">Mañana</option>
+                                    <option value="Tarde">Tarde</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label for="espera-medico" class="form-label small">Médico</label>
+                                <select class="form-select" id="espera-medico">
+                                    <option value="">Cualquier médico</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button type="button" id="btn-inscribir-espera-agendar" class="btn btn-outline-primary mt-3">Inscribirme en lista de espera</button>
+                    </div>
                 </div>
             </main>
         </div>
