@@ -14,3 +14,4 @@ __pycache__/
 # Logs and generated local files
 *.log
 docker-compose
+.github
