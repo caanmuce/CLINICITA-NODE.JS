@@ -1,4 +1,3 @@
-console.log("=== SERVER.JS LOADING FROM:", __filename, "===");
 const express = require("express");
 const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
@@ -11,6 +10,11 @@ const helmet = require("helmet");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 const { mlClient } = require("./services/ml-client");
+// === Módulos MÉDICO y ADMIN (rutas en archivos propios para evitar conflictos de Git) ===
+const { migrar } = require("./rutas/migraciones");          // crea tablas/datos base nuevos
+const { registrarRutasAdmin } = require("./rutas/admin");   // /api/admin/*
+const { calcularHorariosLibres } = require("./rutas/horarios");
+const { hoyClinica, esFechaValida } = require("./rutas/utilidades"); // CAMBIO (admin): fechas en zona de la clínica // horas libres según la tabla horarios
 
 const app = express();
 const query = promisify(conexion.query).bind(conexion);
@@ -128,24 +132,22 @@ function readToken(req) {
  *
  * Uso: app.get("/api/algo", requireAuth, (req, res) => { ... })
  */
-function requireAuth(req, res, next) {
-    // Intenta leer y validar el token de la petición actual.
+// CAMBIO (admin, Opción A): además de validar el token, revisa en la base de datos que la
+// cuenta siga ACTIVA. Así, si el admin desactiva a alguien, su token deja de servir en la
+// siguiente petición (antes servía hasta que expirara, 8 horas).
+async function requireAuth(req, res, next) {
     const user = readToken(req);
-
-    // Si no hay token, está mal formado, la firma no coincide, o ya
-    // expiró: readToken() devuelve null y se corta la petición aquí
-    // con un 401 (No autorizado), sin dejar que llegue a la ruta real.
     if (!user) return res.status(401).json({ mensaje: "Sesión no válida o expirada" });
-
-    // Si el token es válido, se "cuelgan" sus datos (id, rol) en el
-    // objeto req, para que cualquier ruta que use este middleware
-    // después pueda acceder a req.user.id / req.user.rol sin tener
-    // que volver a leer el token.
+    try {
+        const cuenta = await query("SELECT activo FROM usuarios WHERE usuario_id = ?", [user.id]);
+        if (!cuenta.length || !cuenta[0].activo) {
+            return res.status(401).json({ mensaje: "Tu cuenta está desactivada o ya no existe" });
+        }
+    } catch (error) {
+        console.error("Error verificando la cuenta:", error.message);
+        return res.status(500).json({ mensaje: "No fue posible verificar tu cuenta" });
+    }
     req.user = user;
-
-    // next() le da el paso a la siguiente función en la cadena
-    // (el siguiente middleware, o la ruta final). Sin esta llamada,
-    // la petición se quedaría "colgada" sin respuesta.
     next();
 }
 
@@ -248,20 +250,10 @@ async function initializeAuth() {
 }
 
 app.use(helmet());
-console.log("DEBUG: helmet middleware registered");
-app.use((req, res, next) => {
-    console.log("DEBUG: helmet middleware hit for:", req.path);
-    next();
-});
 app.use(cors({
     origin: process.env.CORS_ORIGIN || "http://localhost:3000",
     credentials: true
 }));
-console.log("DEBUG: cors middleware registered");
-app.use((req, res, next) => {
-    console.log("DEBUG: cors middleware hit for:", req.path);
-    next();
-});
 
 // Rate limiting
 const authLimiter = rateLimit({
@@ -280,14 +272,6 @@ const apiLimiter = rateLimit({
 });
 
 app.use(express.json());
-console.log("DEBUG: express.json middleware registered");
-const fs = require('fs');
-try {
-    fs.writeFileSync(path.join(__dirname, 'startup.log'), `STARTUP: ${__dirname}\n`);
-    console.log("DEBUG: startup.log written to:", path.join(__dirname, 'startup.log'));
-} catch (e) {
-    console.error("DEBUG: startup file write error:", e);
-}
 // El panel local usa Tailwind por CDN y JavaScript inline para pruebas manuales.
 app.use("/test-panel.html", (req, res, next) => {
     res.setHeader(
@@ -300,21 +284,18 @@ app.use("/test-panel.html", (req, res, next) => {
     );
     next();
 });
-app.use(express.static(path.join(__dirname, "..", "public"), (req, res, next) => {
-    console.log("DEBUG: express.static middleware hit for:", req.path);
-    next();
-}));
+app.use(express.static(path.join(__dirname, "..", "public")));
 app.use("/api", apiLimiter, (req, res, next) => {
-    const fs = require('fs');
-    try {
-        fs.appendFileSync(path.join(__dirname, 'debug.log'), `MIDDLEWARE: ${req.path} ${req.originalUrl}\n`);
-    } catch (e) {
-        console.error('File write error:', e);
-    }
-    console.log("DEBUG: /api middleware hit for:", req.path);
     res.set("Cache-Control", "no-store");
     next();
 });
+
+// === Registro de rutas de MÉDICO y ADMIN ===
+// Cada archivo recibe lo que necesita (query, middlewares de seguridad, hashPassword)
+// y define sus propias rutas bajo /api/medico y /api/admin. Van después del
+// middleware general de /api (límite de peticiones, Cache-Control) para que
+// también les aplique, y antes del resto de rutas.
+registrarRutasAdmin(app, { query, requireAuth, requireRole, hashPassword });
 
 // Aplicar rate limiting estricto a endpoints de autenticación
 app.post("/api/auth/login", authLimiter);
@@ -383,15 +364,25 @@ app.get("/api/auth/me", requireAuth, async (req, res) => {
 });
 
 app.get("/api/especialidades", requireAuth, requireRole("paciente", "recepcionista", "administrador"), async (req, res) => {
-    const especialidades = await query("SELECT DISTINCT especialidad AS nombre FROM medicos WHERE especialidad <> '' ORDER BY especialidad");
+    // CAMBIO (admin): ahora la lista sale de la tabla `especialidades` que administra el admin.
+    // Solo se muestran las ACTIVAS que tengan al menos un médico activo (no tiene sentido
+    // ofrecer una especialidad sin nadie que atienda). El formato de respuesta NO cambia.
+    const especialidades = await query(
+        `SELECT e.nombre
+         FROM especialidades e
+         WHERE e.activo = 1
+           AND EXISTS (SELECT 1 FROM medicos m WHERE m.especialidad = e.nombre AND m.activo = 1)
+         ORDER BY e.nombre`
+    );
     res.json({ especialidades });
 });
 
 app.get("/api/medicos", requireAuth, requireRole("paciente", "recepcionista", "administrador"), async (req, res) => {
     const filtros = [];
-    let sql = "SELECT medico_id, nombre_completo, especialidad FROM medicos";
+    // CAMBIO (admin): "WHERE activo = 1" oculta a los médicos que el admin desactivó.
+    let sql = "SELECT medico_id, nombre_completo, especialidad FROM medicos WHERE activo = 1";
     if (req.query.especialidad) {
-        sql += " WHERE especialidad = ?";
+        sql += " AND especialidad = ?";
         filtros.push(req.query.especialidad);
     }
     sql += " ORDER BY nombre_completo";
@@ -403,13 +394,13 @@ app.get("/api/horarios", requireAuth, requireRole("paciente"), async (req, res) 
     const { medico, fecha } = req.query;
     if (!medico || !fecha || Number.isNaN(Date.parse(fecha))) return res.status(400).json({ mensaje: "Médico y fecha son obligatorios" });
 
-    const ocupadas = await query(
-        "SELECT hora_cita FROM citas WHERE medico_id = ? AND fecha_cita = ? AND estado NOT IN ('Cancelada', 'No-Asistio')",
-        [medico, fecha]
-    );
-    const ocupadasSet = new Set(ocupadas.map((cita) => String(cita.hora_cita).slice(0, 5)));
-    const horasBase = ["08:00", "09:00", "10:00", "11:00", "14:00", "15:00", "16:00"];
-    res.json({ horarios: horasBase.filter((hora) => !ocupadasSet.has(hora)) });
+    // CAMBIO (admin): antes aquí había una lista fija de horas ("08:00", "09:00"...).
+    // Ahora las horas salen de la tabla `horarios` (la que configura el admin),
+    // descontando las ya ocupadas y las que ya pasaron. La lógica está en rutas/horarios.js.
+    // Parámetro opcional ?sede=ID para ver solo las horas de una sede.
+    // El formato de respuesta NO cambia: { horarios: ["09:00", "09:30", ...] }
+    const horarios = await calcularHorariosLibres(query, medico, fecha, req.query.sede);
+    res.json({ horarios });
 });
 
 app.post("/api/citas", requireAuth, requireRole("paciente"), async (req, res) => {
@@ -430,8 +421,16 @@ app.post("/api/citas", requireAuth, requireRole("paciente"), async (req, res) =>
         const pacienteId = users[0]?.paciente_id;
         if (!pacienteId) return res.status(400).json({ mensaje: "El usuario no está asociado a un paciente" });
 
-        const medicos = await query("SELECT medico_id FROM medicos WHERE medico_id = ?", [medico_id]);
+        const medicos = await query("SELECT medico_id FROM medicos WHERE medico_id = ? AND activo = 1", [medico_id]);
         if (!medicos.length) return res.status(404).json({ mensaje: "El médico seleccionado no existe" });
+
+        // CAMBIO (admin): la hora pedida debe ser una de las horas libres según los horarios
+        // configurados por el admin. Sin esta comprobación, alguien podría saltarse la
+        // pantalla y agendar a las 3 a.m. enviando la petición a mano.
+        const horasLibres = await calcularHorariosLibres(query, medico_id, fecha);
+        if (!horasLibres.includes(hora)) {
+            return res.status(409).json({ mensaje: "Esa hora no está disponible para el médico" });
+        }
 
         const conflictos = await query(
             "SELECT cita_id FROM citas WHERE medico_id = ? AND fecha_cita = ? AND hora_cita = ? AND estado NOT IN ('Cancelada', 'No-Asistio')",
@@ -553,7 +552,11 @@ const schemas = {
         clave: z.string().min(6).max(50),
         rol: z.enum(["paciente", "medico", "recepcionista", "administrador"]),
         paciente_id: z.number().int().positive().optional(),
-        medico_id: z.number().int().positive().optional()
+        medico_id: z.number().int().positive().optional(),
+        // CAMBIO (admin): datos que necesita la fila de paciente o de médico
+        documento: z.string().min(5).max(20).optional(),
+        telefono: z.string().regex(/^\+?\d{7,14}$/, "El teléfono debe tener entre 7 y 14 dígitos").optional(),
+        especialidad: z.string().min(3).max(50).optional()
     }),
     actualizarUsuario: z.object({
         nombre_completo: z.string().min(2).max(100).optional(),
@@ -561,7 +564,10 @@ const schemas = {
         rol: z.enum(["paciente", "medico", "recepcionista", "administrador"]).optional(),
         activo: z.boolean().optional(),
         paciente_id: z.number().int().positive().nullable().optional(),
-        medico_id: z.number().int().positive().nullable().optional()
+        medico_id: z.number().int().positive().nullable().optional(),
+        // CAMBIO (admin): contraseña opcional y especialidad del médico
+        clave: z.string().min(6).max(50).optional(),
+        especialidad: z.string().min(3).max(50).optional()
     }),
     // Admin: Especialidades (se gestionan vía medicos)
     // Admin: Sedes
@@ -691,7 +697,7 @@ app.get("/api/reportes/resumen", requireAuth, requireRole("administrador"), asyn
             `),
             query(`
                 SELECT
-                    COUNT(*) AS total,
+                    SUM(CASE WHEN estado IN ('Completada', 'No-Asistio') THEN 1 ELSE 0 END) AS total,
                     SUM(CASE WHEN estado = 'No-Asistio' THEN 1 ELSE 0 END) AS ausencias
                 FROM citas
                 WHERE fecha_cita >= DATE_FORMAT(NOW(), '%Y-%m-01')
@@ -700,6 +706,7 @@ app.get("/api/reportes/resumen", requireAuth, requireRole("administrador"), asyn
             query("SELECT COUNT(*) AS total FROM lista_espera WHERE estado_espera = 'Activo'")
         ]);
 
+        // CAMBIO (admin): solo cuentan las citas ya resueltas (atendidas + inasistencias).
         const ausentismo = citasAusentismo[0].total > 0
             ? Math.round((citasAusentismo[0].ausencias / citasAusentismo[0].total) * 100)
             : 0;
@@ -751,27 +758,59 @@ app.get("/api/usuarios", requireAuth, requireRole("administrador"), async (req, 
 });
 
 app.post("/api/usuarios", requireAuth, requireRole("administrador"), validar(schemas.crearUsuario), async (req, res) => {
+    // CAMBIO (admin, Opción A): además de la cuenta, crea la fila en `pacientes` o `medicos`.
+    // Antes el paciente quedaba sin paciente_id y no podía agendar.
+    const { nombre_completo, correo, clave, rol, documento, telefono, especialidad, paciente_id, medico_id } = req.validated;
+    const email = correo.trim().toLowerCase();
+    const nombre = nombre_completo.trim();
+    let pacienteCreado = null;
+    let medicoCreado = null;
     try {
-        const { nombre_completo, correo, clave, rol, paciente_id, medico_id } = req.validated;
-        const email = correo.trim().toLowerCase();
+        // Reglas por rol: paciente -> documento y teléfono (o un paciente_id existente);
+        // médico -> especialidad activa (o un medico_id existente).
+        if (rol === "paciente" && !paciente_id && !(documento && telefono)) {
+            return res.status(400).json({ mensaje: "Un paciente necesita documento y teléfono" });
+        }
+        if (rol === "medico" && !medico_id) {
+            if (!especialidad) return res.status(400).json({ mensaje: "Un médico necesita una especialidad" });
+            const esp = await query("SELECT nombre FROM especialidades WHERE nombre = ? AND activo = 1", [especialidad]);
+            if (!esp.length) return res.status(400).json({ mensaje: "La especialidad no existe o está inactiva" });
+        }
 
         const existing = await query("SELECT usuario_id FROM usuarios WHERE correo = ?", [email]);
         if (existing.length) return res.status(409).json({ mensaje: "Ya existe un usuario con ese correo" });
 
+        let pid = paciente_id || null;
+        let mid = medico_id || null;
+        if (rol === "paciente" && !pid) {
+            const r = await query(
+                `INSERT INTO pacientes (nombre_completo, documento_id, telefono_whatsapp, correo_electronico, acepta_politica_datos)
+                 VALUES (?, ?, ?, ?, 1)`,
+                [nombre, documento, telefono.replace(/[\s-]/g, ""), email]
+            );
+            pid = pacienteCreado = r.insertId;
+        }
+        if (rol === "medico" && !mid) {
+            const r = await query(
+                "INSERT INTO medicos (nombre_completo, especialidad, correo_institucional) VALUES (?, ?, ?)",
+                [nombre, especialidad, email]
+            );
+            mid = medicoCreado = r.insertId;
+        }
+
         const result = await query(
             `INSERT INTO usuarios (nombre_completo, correo, clave_hash, rol, paciente_id, medico_id)
              VALUES (?, ?, ?, ?, ?, ?)`,
-            [nombre_completo.trim(), email, hashPassword(clave), rol, paciente_id || null, medico_id || null]
+            [nombre, email, hashPassword(clave), rol, rol === "paciente" ? pid : null, rol === "medico" ? mid : null]
         );
-
-        // Si es médico, crear registro en medicos si no existe
-        if (rol === "medico" && medico_id) {
-            await query("UPDATE medicos SET usuario_id = ? WHERE medico_id = ?", [result.insertId, medico_id]);
-        }
+        if (rol === "medico" && mid) await query("UPDATE medicos SET usuario_id = ? WHERE medico_id = ?", [result.insertId, mid]);
 
         res.status(201).json({ mensaje: "Usuario creado correctamente", usuario_id: result.insertId });
     } catch (error) {
-        if (error.code === "ER_DUP_ENTRY") return res.status(409).json({ mensaje: "El correo ya está registrado" });
+        // Sin transacción segura (no sabemos si la conexión es única o un pool): deshacemos a mano.
+        if (pacienteCreado) await query("DELETE FROM pacientes WHERE paciente_id = ?", [pacienteCreado]).catch(() => {});
+        if (medicoCreado) await query("DELETE FROM medicos WHERE medico_id = ?", [medicoCreado]).catch(() => {});
+        if (error.code === "ER_DUP_ENTRY") return res.status(409).json({ mensaje: "El documento o el correo ya está registrado" });
         console.error("Error creando usuario:", error.message);
         res.status(500).json({ mensaje: "No fue posible crear el usuario" });
     }
@@ -782,34 +821,73 @@ app.put("/api/usuarios/:id", requireAuth, requireRole("administrador"), validar(
         const { id } = req.params;
         const data = req.validated;
 
+        // No puedes desactivarte a ti mismo: te quedarías sin acceso al panel.
+        if (Number(id) === req.user.id && data.activo === false) {
+            return res.status(400).json({ mensaje: "No puedes desactivar tu propia cuenta" });
+        }
+
+        const usuarios = await query("SELECT usuario_id, rol, paciente_id, medico_id FROM usuarios WHERE usuario_id = ?", [id]);
+        if (!usuarios.length) return res.status(404).json({ mensaje: "Usuario no encontrado" });
+        const usuario = usuarios[0];
+
         if (data.correo) {
             const existing = await query("SELECT usuario_id FROM usuarios WHERE correo = ? AND usuario_id <> ?", [data.correo, id]);
             if (existing.length) return res.status(409).json({ mensaje: "El correo ya está en uso" });
         }
 
+        // Especialidad: solo aplica a médicos y debe existir y estar activa.
+        if (data.especialidad !== undefined && usuario.medico_id) {
+            const esp = await query("SELECT nombre FROM especialidades WHERE nombre = ? AND activo = 1", [data.especialidad]);
+            if (!esp.length) return res.status(400).json({ mensaje: "La especialidad elegida no existe o está inactiva" });
+            await query("UPDATE medicos SET especialidad = ? WHERE medico_id = ?", [esp[0].nombre, usuario.medico_id]);
+        }
+
+        // Campos de la tabla usuarios (la clave se guarda hasheada, en clave_hash).
         const campos = [];
         const valores = [];
-        for (const [key, value] of Object.entries(data)) {
-            if (value !== undefined) {
+        const permitidos = ["nombre_completo", "correo", "rol", "activo", "paciente_id", "medico_id"];
+        for (const key of permitidos) {
+            if (data[key] !== undefined) {
                 campos.push(`${key} = ?`);
-                valores.push(value);
+                valores.push(key === "correo" ? data.correo.trim().toLowerCase() : data[key]);
             }
         }
-        if (!campos.length) return res.status(400).json({ mensaje: "No hay datos para actualizar" });
+        if (data.clave) {
+            campos.push("clave_hash = ?");
+            valores.push(hashPassword(data.clave));
+        }
+        if (campos.length) {
+            valores.push(id);
+            await query(`UPDATE usuarios SET ${campos.join(", ")} WHERE usuario_id = ?`, valores);
+        }
 
-        valores.push(id);
-        await query(`UPDATE usuarios SET ${campos.join(", ")} WHERE usuario_id = ?`, valores);
+        // El nombre vive también en pacientes y medicos: se mantiene igual en las tres tablas.
+        if (data.nombre_completo !== undefined) {
+            if (usuario.paciente_id) await query("UPDATE pacientes SET nombre_completo = ? WHERE paciente_id = ?", [data.nombre_completo.trim(), usuario.paciente_id]);
+            if (usuario.medico_id) await query("UPDATE medicos SET nombre_completo = ? WHERE medico_id = ?", [data.nombre_completo.trim(), usuario.medico_id]);
+        }
 
-        // Sincronizar medico_id en tabla medicos si cambió
+        // Sincronizar el vínculo usuario <-> médico (como ya hacía el código del equipo).
         if (data.medico_id !== undefined) {
             await query("UPDATE medicos SET usuario_id = NULL WHERE usuario_id = ?", [id]);
-            if (data.medico_id) {
-                await query("UPDATE medicos SET usuario_id = ? WHERE medico_id = ?", [id, data.medico_id]);
-            }
+            if (data.medico_id) await query("UPDATE medicos SET usuario_id = ? WHERE medico_id = ?", [id, data.medico_id]);
         }
 
+        // CAMBIO (admin): al desactivar o activar a un médico, también se oculta o muestra a los pacientes.
+        if (data.activo !== undefined) {
+            const medico = await query(
+                "SELECT COALESCE(u.medico_id, m.medico_id) AS medico_id FROM usuarios u LEFT JOIN medicos m ON m.usuario_id = u.usuario_id WHERE u.usuario_id = ?",
+                [id]
+            );
+            if (medico[0]?.medico_id) await query("UPDATE medicos SET activo = ? WHERE medico_id = ?", [data.activo ? 1 : 0, medico[0].medico_id]);
+        }
+
+        if (!campos.length && data.nombre_completo === undefined && data.especialidad === undefined && data.medico_id === undefined) {
+            return res.status(400).json({ mensaje: "No hay datos para actualizar" });
+        }
         res.json({ mensaje: "Usuario actualizado correctamente" });
     } catch (error) {
+        if (error.code === "ER_DUP_ENTRY") return res.status(409).json({ mensaje: "El documento o el correo ya está registrado" });
         console.error("Error actualizando usuario:", error.message);
         res.status(500).json({ mensaje: "No fue posible actualizar el usuario" });
     }
@@ -818,11 +896,17 @@ app.put("/api/usuarios/:id", requireAuth, requireRole("administrador"), validar(
 app.delete("/api/usuarios/:id", requireAuth, requireRole("administrador"), async (req, res) => {
     try {
         const { id } = req.params;
-        // No permitir auto-eliminación
+        // No permitir auto-desactivación
         if (Number(id) === req.user.id) {
             return res.status(400).json({ mensaje: "No puede eliminarse a sí mismo" });
         }
+        // CAMBIO (admin): desactivar también oculta al médico a los pacientes (medicos.activo = 0).
+        const medico = await query(
+            "SELECT COALESCE(u.medico_id, m.medico_id) AS medico_id FROM usuarios u LEFT JOIN medicos m ON m.usuario_id = u.usuario_id WHERE u.usuario_id = ?",
+            [id]
+        );
         await query("UPDATE usuarios SET activo = 0 WHERE usuario_id = ?", [id]);
+        if (medico[0]?.medico_id) await query("UPDATE medicos SET activo = 0 WHERE medico_id = ?", [medico[0].medico_id]);
         res.json({ mensaje: "Usuario desactivado correctamente" });
     } catch (error) {
         console.error("Error desactivando usuario:", error.message);
@@ -933,6 +1017,16 @@ app.post("/api/horarios/admin", requireAuth, requireRole("administrador"), valid
         if (hora_inicio >= hora_fin) {
             return res.status(400).json({ mensaje: "La hora de inicio debe ser anterior a la hora de fin" });
         }
+
+        // CAMBIO (admin): un médico no puede estar en dos lugares a la vez. Se revisa el traslape
+        // con CUALQUIER sede del mismo médico y día (dos rangos se traslapan si cada uno empieza
+        // antes de que el otro termine).
+        const traslape = await query(
+            `SELECT horario_id FROM horarios
+             WHERE medico_id = ? AND dia_semana = ? AND activo = 1 AND hora_inicio < ? AND hora_fin > ?`,
+            [medico_id, dia_semana, hora_fin, hora_inicio]
+        );
+        if (traslape.length) return res.status(409).json({ mensaje: "Ese bloque se traslapa con otro horario del mismo médico y día" });
 
         const existing = await query(
             "SELECT horario_id FROM horarios WHERE medico_id = ? AND sede_id = ? AND dia_semana = ? AND hora_inicio = ? AND hora_fin = ?",
@@ -1357,9 +1451,10 @@ app.delete("/api/lista-espera/:id", requireAuth, requireRole("recepcionista", "a
 // -------------------- MÉDICO: AGENDA --------------------
 app.get("/api/citas/medico", requireAuth, requireRole("medico"), async (req, res) => {
     try {
-        const { fecha } = req.query;
-        if (!fecha || Number.isNaN(Date.parse(fecha))) {
-            return res.status(400).json({ mensaje: "Fecha es obligatoria" });
+        // Si no llega fecha (primera carga de la agenda), se usa el "hoy" de la clínica.
+        const fecha = req.query.fecha || hoyClinica();
+        if (!esFechaValida(fecha)) {
+            return res.status(400).json({ mensaje: "La fecha no es válida (use AAAA-MM-DD)" });
         }
 
         // Obtener medico_id del usuario logueado
@@ -1367,11 +1462,18 @@ app.get("/api/citas/medico", requireAuth, requireRole("medico"), async (req, res
         const medicoId = users[0]?.medico_id;
         if (!medicoId) return res.status(400).json({ mensaje: "El usuario no está asociado a un médico" });
 
+        const medicos = await query("SELECT nombre_completo, especialidad FROM medicos WHERE medico_id = ?", [medicoId]);
+        if (!medicos.length) return res.status(404).json({ mensaje: "No se encontró tu registro de médico" });
+
+        // CAMBIO (admin): incluye los síntomas que reportó el paciente (fichas_preconsulta).
+        // GROUP_CONCAT une varios síntomas en un solo texto; si no hay ninguno, queda NULL.
         const citas = await query(`
             SELECT c.cita_id, TIME_FORMAT(c.hora_cita, '%H:%i') AS hora,
                    p.nombre_completo AS paciente, p.documento_id,
                    c.motivo, c.estado,
-                   s.nombre AS sede
+                   s.nombre AS sede,
+                   (SELECT GROUP_CONCAT(f.sintomas ORDER BY f.fecha_registro, f.ficha_id SEPARATOR ' | ')
+                      FROM fichas_preconsulta f WHERE f.cita_id = c.cita_id) AS sintomas
             FROM citas c
             JOIN pacientes p ON p.paciente_id = c.paciente_id
             LEFT JOIN sedes s ON s.sede_id = c.sede_id
@@ -1379,21 +1481,29 @@ app.get("/api/citas/medico", requireAuth, requireRole("medico"), async (req, res
             ORDER BY c.hora_cita
         `, [medicoId, fecha]);
 
-        // Contar KPIs
-        const [confirmadas, pendientes, canceladas, atendidas] = await Promise.all([
-            query("SELECT COUNT(*) AS total FROM citas WHERE medico_id = ? AND fecha_cita = ? AND estado = 'Confirmada'", [medicoId, fecha]),
-            query("SELECT COUNT(*) AS total FROM citas WHERE medico_id = ? AND fecha_cita = ? AND estado = 'Pendiente'", [medicoId, fecha]),
-            query("SELECT COUNT(*) AS total FROM citas WHERE medico_id = ? AND fecha_cita = ? AND estado = 'Cancelada'", [medicoId, fecha]),
-            query("SELECT COUNT(*) AS total FROM citas WHERE medico_id = ? AND fecha_cita = ? AND estado = 'Completada'", [medicoId, fecha])
-        ]);
+        // Totales por estado (mismos nombres que usa la pantalla del médico).
+        const resumen = { Pendiente: 0, Confirmada: 0, Cancelada: 0, Completada: 0, "No-Asistio": 0 };
+        citas.forEach((cita) => { resumen[cita.estado] = (resumen[cita.estado] || 0) + 1; });
+
+        // CAMBIO (admin): el SERVIDOR decide si se puede registrar asistencia.
+        // Canceladas y citas de días futuros no se pueden marcar.
+        const hoy = hoyClinica();
+        citas.forEach((cita) => {
+            cita.puede_marcar = fecha <= hoy && ["Pendiente", "Confirmada", "Completada", "No-Asistio"].includes(cita.estado);
+        });
 
         res.json({
+            fecha,
+            hoy,
+            medico: medicos[0],
             citas,
+            resumen,
+            // Se mantiene el formato anterior por compatibilidad
             kpis: {
-                confirmadas: confirmadas[0].total,
-                pendientes: pendientes[0].total,
-                canceladas: canceladas[0].total,
-                atendidas: atendidas[0].total
+                confirmadas: resumen.Confirmada,
+                pendientes: resumen.Pendiente,
+                canceladas: resumen.Cancelada,
+                atendidas: resumen.Completada
             }
         });
     } catch (error) {
@@ -1406,17 +1516,44 @@ app.put("/api/citas/:id/estado", requireAuth, requireRole("medico", "recepcionis
     try {
         const { id } = req.params;
         const { estado } = req.validated;
+        if (!/^\d+$/.test(id)) return res.status(400).json({ mensaje: "Identificador de cita no válido" });
 
-        // Verificar permisos: médico solo puede modificar sus citas
         if (req.user.rol === "medico") {
+            // CAMBIO (admin): reglas de asistencia del médico.
+            // El médico solo marca Completada o No-Asistio, y solo en sus citas.
+            if (!["Completada", "No-Asistio"].includes(estado)) {
+                return res.status(400).json({ mensaje: "El médico solo puede marcar Completada o No-Asistio" });
+            }
             const users = await query("SELECT medico_id FROM usuarios WHERE usuario_id = ? AND rol = 'medico' AND activo = 1", [req.user.id]);
             const medicoId = users[0]?.medico_id;
             if (!medicoId) return res.status(400).json({ mensaje: "Usuario no asociado a médico" });
 
-            const cita = await query("SELECT cita_id FROM citas WHERE cita_id = ? AND medico_id = ?", [id, medicoId]);
-            if (!cita.length) return res.status(404).json({ mensaje: "Cita no encontrada o no pertenece a este médico" });
+            const filas = await query(
+                "SELECT estado, DATE_FORMAT(fecha_cita, '%Y-%m-%d') AS fecha FROM citas WHERE cita_id = ? AND medico_id = ?",
+                [id, medicoId]
+            );
+            if (!filas.length) return res.status(404).json({ mensaje: "Cita no encontrada o no pertenece a este médico" });
+
+            const cita = filas[0];
+            if (cita.estado === "Cancelada") return res.status(409).json({ mensaje: "No se puede modificar una cita cancelada" });
+            if (cita.estado === estado) return res.status(409).json({ mensaje: `La cita ya está marcada como ${estado}` });
+            if (cita.fecha > hoyClinica()) return res.status(409).json({ mensaje: "No puedes registrar la asistencia de una cita futura" });
+
+            // UPDATE condicional: si la cita se canceló entre la lectura y esta escritura, no se pisa.
+            const r = await query(
+                `UPDATE citas SET estado = ?
+                 WHERE cita_id = ? AND medico_id = ? AND estado IN ('Pendiente', 'Confirmada', 'Completada', 'No-Asistio')`,
+                [estado, id, medicoId]
+            );
+            if (r.affectedRows === 0) return res.status(409).json({ mensaje: "La cita cambió mientras la editabas. Recarga la agenda." });
+
+            return res.json({
+                mensaje: estado === "Completada" ? "Cita marcada como atendida" : "Cita marcada como inasistencia",
+                estado
+            });
         }
 
+        // Recepcionista y administrador: sin cambios respecto al código del equipo.
         const estadosValidos = ["Confirmada", "Completada", "No-Asistio"];
         if (!estadosValidos.includes(estado)) return res.status(400).json({ mensaje: "Estado no válido" });
 
@@ -1494,19 +1631,11 @@ app.post("/api/pacientes/riesgo/recalcular-todos", requireAuth, requireRole("adm
     }
 });
 
-console.log("DEBUG: Registering test route...");
-console.log("DEBUG: ML_SERVICE_URL =", ML_SERVICE_URL);
-console.log("DEBUG: mlClient baseURL =", require("./services/ml-client").mlClient.client.defaults.baseURL);
-// TEST ROUTE - para verificar registro de rutas
-app.get("/api/test", (req, res) => {
-    const fs = require('fs');
-    fs.appendFileSync('debug.log', `HIT: ${req.path} ${req.originalUrl}\n`);
-    console.log("DEBUG: /api/test HIT! Path:", req.path, "OriginalUrl:", req.originalUrl);
-    res.json({ mensaje: "Test route works - SIMPLE", test: true, cwd: process.cwd() });
-});
-console.log("DEBUG: Test route registered");
 
 initializeAuth()
+    // CAMBIO (admin): después de preparar la autenticación, aplica las migraciones de
+    // médico/admin (tabla especialidades y vínculo del médico demo).
+    .then(() => migrar({ query }))
     .then(() => app.listen(3000, async () => {
         console.log("Servidor iniciado en http://localhost:3000");
         console.log(`WhatsApp: ${process.env.ENABLE_WHATSAPP === "true" ? "activado" : "desactivado"}`);

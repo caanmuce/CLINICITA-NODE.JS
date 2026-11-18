@@ -1,0 +1,233 @@
+/**
+ * public/assets/css/panel.css
+ * ---------------------------------------------------------------------------
+ * Estilos EXTRA para los paneles de MÉDICO y ADMIN.
+ * Archivo nuevo: se carga DESPUÉS de estilos.css y solo AGREGA clases (no
+ * modifica las existentes), así no choca con el trabajo de tus compañeros.
+ * Reutiliza las variables de color de estilos.css (--clinicita-teal, etc.).
+ *
+ * Contenido:
+ *   1. Cabecera de página y usuario en la barra lateral
+ *   2. Tarjetas de indicadores (KPI) con icono
+ *   3. Insignias (estado de cita, rol, activo/inactivo)
+ *   4. Tablas
+ *   5. Avisos flotantes (toasts)
+ *   6. Reportes: barra de ausentismo
+ */
+
+/* ---------- 1. Cabecera de página y barra lateral ---------- */
+.panel-encabezado {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 1.5rem;
+}
+.panel-encabezado h1 { margin-bottom: .15rem; }
+.panel-subtitulo { color: #5a6d73; font-size: .95rem; margin: 0; text-transform: capitalize; }
+.panel-subtitulo.sin-capitalizar { text-transform: none; }
+
+/* Nombre del usuario conectado, bajo el rol en la barra lateral */
+.sidebar-usuario {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    padding: .6rem .7rem;
+    margin-bottom: 1.25rem;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .06);
+    color: #fff;
+    font-size: .85rem;
+    line-height: 1.2;
+}
+.sidebar-usuario .avatar {
+    flex: 0 0 auto;
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: var(--clinicita-teal);
+    display: flex; align-items: center; justify-content: center;
+}
+.sidebar-usuario .nombre { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- 2. Tarjetas KPI con icono ---------- */
+.kpi-con-icono {
+    display: flex;
+    align-items: center;
+    gap: .9rem;
+    height: 100%;
+    transition: box-shadow .2s, transform .2s;
+}
+.kpi-con-icono:hover { box-shadow: 0 8px 24px rgba(13, 148, 136, .12); transform: translateY(-2px); }
+.kpi-icono {
+    flex: 0 0 auto;
+    width: 46px; height: 46px;
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.35rem;
+}
+.kpi-icono.kpi-teal   { background: #E0F7F5; color: var(--clinicita-teal); }
+.kpi-icono.kpi-azul   { background: #DBEAFE; color: #2563EB; }
+.kpi-icono.kpi-ambar  { background: #FEF3C7; color: #D97706; }
+.kpi-icono.kpi-verde  { background: #DCFCE7; color: #16A34A; }
+.kpi-icono.kpi-rojo   { background: #FFE4E6; color: #E11D48; }
+.kpi-icono.kpi-gris   { background: #E2E8F0; color: #475569; }
+.kpi-icono.kpi-violeta{ background: #EDE9FE; color: #7C3AED; }
+.kpi-con-icono .kpi-value { line-height: 1.1; }
+.kpi-nota { font-size: .72rem; color: #7b8b91; margin-top: .15rem; }
+
+/* ---------- 3. Insignias ---------- */
+.insignia {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    font-size: .75rem;
+    font-weight: 600;
+    padding: .3rem .65rem;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+/* Estados de una cita */
+.estado-pendiente  { background: #FEF3C7; color: #92400E; }
+.estado-confirmada { background: #DBEAFE; color: #1E40AF; }
+.estado-completada { background: #DCFCE7; color: #166534; }
+.estado-no-asistio { background: #FFE4E6; color: #9F1239; }
+.estado-cancelada  { background: #E2E8F0; color: #475569; }
+/* Roles */
+.rol-paciente      { background: #E0F7F5; color: #0A7A70; }
+.rol-medico        { background: #DBEAFE; color: #1E40AF; }
+.rol-recepcionista { background: #FEF3C7; color: #92400E; }
+.rol-administrador { background: #EDE9FE; color: #5B21B6; }
+/* Cuenta activa / inactiva */
+.cuenta-activa   { background: #DCFCE7; color: #166534; }
+.cuenta-inactiva { background: #E2E8F0; color: #475569; }
+
+/* ---------- 3b. Botones pequeños ----------
+ * estilos.css define .btn-clinicita y .btn-outline-clinicita con un relleno
+ * grande (.6rem 1.4rem) que pisa a Bootstrap .btn-sm, y los botones de icono
+ * de las tablas salían más grandes que los demás. Esta regla (más específica)
+ * hace que .btn-sm vuelva a ser pequeño sin tocar estilos.css. */
+.btn-clinicita.btn-sm,
+.btn-outline-clinicita.btn-sm {
+    padding: .25rem .65rem;
+    font-size: .875rem;
+    border-width: 1px;
+    border-style: solid;
+    border-radius: 6px;
+}
+.btn-clinicita.btn-sm { border-color: var(--clinicita-teal); }
+
+/* ---------- 4. Tablas ---------- */
+.tabla-panel { margin-bottom: 0; }
+.tabla-panel tbody tr { transition: background .15s; }
+.tabla-panel tbody tr:hover { background: #F4FFFE; }
+.tabla-panel td { vertical-align: middle; }
+.tabla-panel tfoot td { font-weight: 700; background: #F4FFFE; border-top: 2px solid var(--clinicita-teal); }
+.fila-apagada { opacity: .55; }
+.texto-sintomas {
+    display: block;
+    margin-top: .25rem;
+    font-size: .78rem;
+    color: #0A7A70;
+}
+.celda-acciones { white-space: nowrap; }
+.celda-acciones .btn { margin-left: .25rem; }
+
+/* Tabla "apilable": en pantallas pequeñas (celular) cada fila se convierte en una
+ * tarjeta y cada celda muestra su título (atributo data-label) a la izquierda.
+ * Sin esto, la columna "Asistencia" quedaba fuera de pantalla y solo se
+ * alcanzaba con scroll horizontal. Se activa con la clase .tabla-apilable. */
+@media (max-width: 767.98px) {
+    .tabla-apilable thead { display: none; }
+    .tabla-apilable,
+    .tabla-apilable tbody,
+    .tabla-apilable tr,
+    .tabla-apilable td { display: block; width: 100%; }
+    .tabla-apilable tr {
+        border: 1px solid #e8f5f3;
+        border-radius: 12px;
+        padding: .6rem 1rem;
+        margin-bottom: .75rem;
+    }
+    .tabla-apilable td {
+        display: flex;
+        gap: .75rem;
+        align-items: flex-start;
+        border: 0;
+        padding: .3rem 0;
+        white-space: normal;
+    }
+    .tabla-apilable td::before {
+        content: attr(data-label);
+        flex: 0 0 5.2rem;
+        font-size: .72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        color: #5a6d73;
+        padding-top: .15rem;
+    }
+    .tabla-apilable tr.fila-cargando td::before { content: none; }
+}
+
+/* Fila de "cargando" */
+.fila-cargando td { text-align: center; padding: 2rem 1rem; color: #6b7c82; }
+
+/* Botón de asistencia: el activo se rellena, el otro queda con borde */
+.btn-asistencia { font-weight: 600; font-size: .8rem; }
+
+/* ---------- 5. Avisos flotantes ---------- */
+#panel-avisos {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    gap: .6rem;
+    max-width: min(380px, calc(100vw - 2rem));
+}
+.panel-aviso {
+    display: flex;
+    align-items: flex-start;
+    gap: .6rem;
+    padding: .8rem 1rem;
+    border-radius: 12px;
+    color: #fff;
+    font-size: .9rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .25);
+    animation: aviso-entra .25s ease-out;
+}
+.panel-aviso i { font-size: 1.1rem; margin-top: .05rem; }
+.panel-aviso.aviso-success { background: #0D9488; }
+.panel-aviso.aviso-danger  { background: #BE123C; }
+.panel-aviso.aviso-warning { background: #B45309; }
+.panel-aviso.aviso-info    { background: #1B4F72; }
+@keyframes aviso-entra {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) { .panel-aviso { animation: none; } }
+
+/* ---------- 6. Reportes ---------- */
+.barra-tasa { display: flex; align-items: center; gap: .6rem; min-width: 150px; }
+.barra-tasa .progress { flex: 1; height: 8px; background: #E2E8F0; }
+.barra-tasa .progress-bar { background: #E11D48; }
+.barra-tasa .valor { font-weight: 700; min-width: 3.2rem; text-align: right; }
+
+/* Accesos rápidos del panel */
+.acceso-rapido {
+    display: flex;
+    align-items: center;
+    gap: .8rem;
+    padding: 1rem 1.1rem;
+    border: 1px solid #e8f5f3;
+    border-radius: 12px;
+    background: #fff;
+    color: #1a2e35;
+    text-decoration: none;
+    height: 100%;
+    transition: border-color .2s, box-shadow .2s, transform .2s;
+}
+.acceso-rapido:hover { border-color: var(--clinicita-teal); box-shadow: 0 8px 24px rgba(13, 148, 136, .12); transform: translateY(-2px); color: #1a2e35; }
+.acceso-rapido small { color: #6b7c82; display: block; }
