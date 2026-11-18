@@ -4,6 +4,9 @@ import numpy as np
 import pandas as pd
 from typing import Any, Dict, List
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ModelPredictor:
