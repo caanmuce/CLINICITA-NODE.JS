@@ -523,7 +523,7 @@
  
     const jsonHeaders = () => ({ ...authHeaders(), "Content-Type": "application/json" });
  
-    // Los horarios de ejemplo cubren lunes a viernes: se propone el próximo lunes.
+    // Los horarios de ejemplo cubren lunes a viernes y domingo: se propone el próximo lunes.
     function proximoLunes() {
       const d = new Date();
       d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7));

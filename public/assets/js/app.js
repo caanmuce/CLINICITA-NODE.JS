@@ -278,6 +278,11 @@ document.addEventListener("DOMContentLoaded", () => {
         refrescarCada(numerosDelKpi);
     }
 
+    if (document.getElementById("panel-lista-espera-paciente")) {
+        cargarListaEsperaPaciente();
+        refrescarCada(cargarListaEsperaPaciente, 60000);
+    }
+
     // Recepcionista: citas con filtros y coloreo de riesgo, cada 60 s.
     if (document.getElementById("tabla-citas")) {
         cargarCitasRecepcionista();
@@ -332,6 +337,7 @@ async function cargarFormularioCita() {
  
     medico.addEventListener("change", cargarHorarios);
     fecha.addEventListener("change", cargarHorarios);
+    document.getElementById("sede")?.addEventListener("change", cargarHorarios);
 }
 
 /**
@@ -342,6 +348,7 @@ async function cargarHorarios() {
     const medico = document.getElementById("medico");
     const fecha = document.getElementById("fecha");
     const hora = document.getElementById("hora");
+    const sede = document.getElementById("sede")?.value || "";
     if (!medico || !fecha || !hora) return;
  
     hora.innerHTML = '<option value="">Selecciona médico y fecha primero...</option>';
@@ -349,16 +356,34 @@ async function cargarHorarios() {
     if (hora.disabled) return;
  
     // Si el usuario cambia de médico o fecha mientras llega la respuesta, se descarta la vieja.
-    const consulta = `${medico.value}|${fecha.value}`;
+    const consulta = `${medico.value}|${fecha.value}|${sede}`;
  
     try {
-        const respuesta = await api(`/horarios?medico=${encodeURIComponent(medico.value)}&fecha=${encodeURIComponent(fecha.value)}`);
-        if (consulta !== `${medico.value}|${fecha.value}`) return;
+        const respuesta = await api(`/horarios?medico=${encodeURIComponent(medico.value)}&fecha=${encodeURIComponent(fecha.value)}${sede ? `&sede=${encodeURIComponent(sede)}` : ""}`);
+        if (consulta !== `${medico.value}|${fecha.value}|${document.getElementById("sede")?.value || ""}`) return;
  
         const horas = respuesta.horarios || [];
         hora.innerHTML = horas.length
             ? '<option value="">Selecciona...</option>'
             : '<option value="">Sin horarios disponibles ese día</option>';
+        const panelEspera = document.getElementById("panel-lista-espera-agendar");
+        if (panelEspera) {
+            panelEspera.classList.toggle("d-none", horas.length > 0);
+            if (!horas.length) {
+                const fechaDesde = document.getElementById("espera-fecha-desde");
+                const fechaHasta = document.getElementById("espera-fecha-hasta");
+                const medicoPreferido = document.getElementById("espera-medico");
+                if (fechaDesde) {
+                    fechaDesde.min = new Date().toLocaleDateString("sv-SE");
+                    fechaDesde.value = fecha.value;
+                }
+                if (fechaHasta) {
+                    fechaHasta.min = fecha.value;
+                    fechaHasta.value = fecha.value;
+                }
+                if (medicoPreferido) await cargarMedicosPreferidosEspera(medico.value);
+            }
+        }
         horas.forEach((h) => {
             const opcion = document.createElement("option");
             opcion.value = h;
@@ -1148,6 +1173,45 @@ async function llenarEspecialidadesListaEspera() {
             opcion.textContent = e.nombre;
             select.appendChild(opcion);
         });
+        const filtroEspecialidad = document.getElementById("filtro-espera-especialidad");
+        if (filtroEspecialidad) {
+            especialidades.forEach((e) => {
+                const opcion = document.createElement("option");
+                opcion.value = e.nombre;
+                opcion.textContent = e.nombre;
+                filtroEspecialidad.appendChild(opcion);
+            });
+        }
+
+        const { sedes = [] } = await api("/sedes");
+        const sedeSelect = document.getElementById("lista-sede");
+        const filtroSede = document.getElementById("filtro-espera-sede");
+        [sedeSelect, filtroSede].filter(Boolean).forEach((selectSede) => {
+            sedes.forEach((sede) => {
+                const opcion = document.createElement("option");
+                opcion.value = sede.sede_id;
+                opcion.textContent = sede.nombre;
+                selectSede.appendChild(opcion);
+            });
+        });
+        const medicoSelect = document.getElementById("lista-medico");
+        if (medicoSelect) {
+            select.addEventListener("change", async () => {
+                medicoSelect.innerHTML = '<option value="">Cualquier médico</option>';
+                if (!select.value) return;
+                try {
+                    const { medicos = [] } = await api(`/medicos?especialidad=${encodeURIComponent(select.value)}`);
+                    medicos.forEach((medico) => {
+                        const opcion = document.createElement("option");
+                        opcion.value = medico.medico_id;
+                        opcion.textContent = medico.nombre_completo;
+                        medicoSelect.appendChild(opcion);
+                    });
+                } catch (error) {
+                    mostrarAlerta(error.message, "danger");
+                }
+            });
+        }
     } catch (error) {
         mostrarAlerta(error.message, "danger");
     }
@@ -1164,7 +1228,17 @@ async function cargarListaEspera() {
     const vacio = document.querySelector(".empty-state");
 
     try {
-        const params = new URLSearchParams({ estado: "Activo", page: "1", limit: "50" });
+        const params = new URLSearchParams({ estado: "Activo,Ofertado", page: "1", limit: "100" });
+        const filtros = {
+            q: document.getElementById("filtro-espera-q")?.value.trim(),
+            especialidad: document.getElementById("filtro-espera-especialidad")?.value,
+            sede_id: document.getElementById("filtro-espera-sede")?.value,
+            fecha_desde: document.getElementById("filtro-espera-desde")?.value,
+            fecha_hasta: document.getElementById("filtro-espera-hasta")?.value
+        };
+        Object.entries(filtros).forEach(([clave, valor]) => {
+            if (valor) params.set(clave, valor);
+        });
         const { lista_espera = [] } = await api(`/lista-espera?${params}`);
 
         tbody.innerHTML = "";
@@ -1179,38 +1253,44 @@ async function cargarListaEspera() {
                 : "";
 
             const fila = document.createElement("tr");
+            const rangoFechas = item.fecha_desde || item.fecha_hasta
+                ? `${item.fecha_desde || "Sin inicio"} – ${item.fecha_hasta || "Sin límite"}`
+                : "Cualquier fecha";
+            const preferencias = [
+                item.sede_nombre || "Cualquier sede",
+                item.medico_preferido || "Cualquier médico",
+                rangoFechas,
+                ({ Manana: "Mañana", Tarde: "Tarde", Cualquiera: "Cualquier horario" })[item.franja_horaria] || "Cualquier horario"
+            ].join(" · ");
+            const estadoOferta = item.estado_espera === "Ofertado"
+                ? `<strong>Oferta #${escaparHTML(item.oferta_id || "")}</strong><br><small>${escaparHTML(item.oferta_fecha || "")} ${escaparHTML(item.oferta_hora || "")} · vence ${escaparHTML(item.oferta_vence_en || "")}</small>`
+                : escaparHTML(item.estado_espera || "Activo");
+            const nivelRiesgo = item.riesgo_no_show || "Sin cálculo";
+            const colorRiesgo = ({ "Bajo": "bg-success", "Medio": "bg-warning text-dark", "Alto": "bg-danger", "Crítico": "bg-dark" })[nivelRiesgo] || "bg-secondary";
+            const riesgoNoShow = item.riesgo_no_show
+                ? `<span class="badge ${colorRiesgo}">${escaparHTML(nivelRiesgo)}</span><br><small class="text-muted">${escaparHTML(item.score_no_show)}%</small>`
+                : '<span class="text-muted small">Sin cálculo</span>';
             fila.innerHTML = `
                 <td>${indice + 1}</td>
                 <td>
                     ${escaparHTML(item.nombre_completo)}
                     <br><small class="text-muted">${escaparHTML(item.documento_id)}${item.telefono_whatsapp ? " · " + escaparHTML(item.telefono_whatsapp) : ""}</small>
                 </td>
+                <td>${escaparHTML(item.especialidad_requerida || "Cualquiera")}</td>
+                <td><small>${escaparHTML(preferencias)}</small></td>
+                <td>${riesgoNoShow}</td>
                 <td>
-                    ${escaparHTML(item.especialidad_requerida || "Cualquiera")}
-                    ${item.sede_nombre ? `<br><small class="text-muted">${escaparHTML(item.sede_nombre)}</small>` : ""}
-                    ${item.observaciones ? `<br><small class="text-muted">${escaparHTML(item.observaciones)}</small>` : ""}
-                </td>
-                <td>
-                    <!-- idEscapado protege el atributo data-espera-id -->
                     <select class="form-select form-select-sm" data-espera-prioridad data-espera-id="${idEscapado}">
                         ${["Alta", "Media", "Baja"].map((p) =>
-
                             `<option value="${p}" ${p === String(item.prioridad) ? "selected" : ""}>${PRIORIDAD_ETIQUETA[p] || p}</option>`
                         ).join("")}
                     </select>
                 </td>
+                <td>${estadoOferta}</td>
                 <td>${escaparHTML(fecha)}</td>
                 <td class="text-nowrap">
-                    <!-- idEscapado en todos los botones para evitar rotura de atributos -->
-                    <button class="btn btn-outline-success btn-sm" data-accion="espera-asignar" data-espera-id="${idEscapado}" title="Marcar como asignado">
-                        <i class="bi bi-check-circle"></i>
-                    </button>
-                    <button class="btn btn-outline-secondary btn-sm" data-accion="espera-expirar" data-espera-id="${idEscapado}" title="Marcar como expirado">
-                        <i class="bi bi-clock-history"></i>
-                    </button>
-                    <button class="btn btn-outline-danger btn-sm" data-accion="espera-eliminar" data-espera-id="${idEscapado}" title="Eliminar">
-                        <i class="bi bi-trash"></i>
-                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" data-accion="espera-expirar" data-espera-id="${idEscapado}" title="Expirar inscripción"><i class="bi bi-clock-history"></i></button>
+                    <button class="btn btn-outline-danger btn-sm" data-accion="espera-eliminar" data-espera-id="${idEscapado}" title="Retirar inscripción"><i class="bi bi-x-circle"></i></button>
                 </td>
             `;
             tbody.appendChild(fila);
@@ -1222,6 +1302,34 @@ async function cargarListaEspera() {
     }
 }
 
+
+/** Consulta el historial de ofertas visible para recepción. */
+async function cargarHistorialOfertas() {
+    const tbody = document.getElementById("tabla-historial-ofertas");
+    if (!tbody) return;
+    try {
+        const { ofertas = [] } = await api("/lista-espera/ofertas?limit=100");
+        if (!ofertas.length) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-muted">Todavía no hay ofertas registradas.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = ofertas.map((oferta) => {
+            const fecha = oferta.fecha_cita ? new Date(`${String(oferta.fecha_cita).slice(0, 10)}T${String(oferta.hora_cita || "00:00:00").slice(0, 8)}`).toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" }) : "—";
+            const badge = ({ Pendiente: "bg-warning text-dark", Aceptada: "bg-success", Rechazada: "bg-secondary", Expirada: "bg-dark", Cancelada: "bg-secondary" })[oferta.estado] || "bg-secondary";
+            return `<tr>
+                <td>${escaparHTML(oferta.paciente || "Paciente")}<br><small class="text-muted">${escaparHTML(oferta.documento_id || "")}</small></td>
+                <td>${escaparHTML(fecha)}<br><small class="text-muted">${escaparHTML(oferta.especialidad || "")}</small></td>
+                <td>${escaparHTML(oferta.medico || "—")}<br><small class="text-muted">${escaparHTML(oferta.sede || "Cualquier sede")}</small></td>
+                <td><span class="badge ${badge}">${escaparHTML(oferta.estado)}</span></td>
+                <td>${escaparHTML(oferta.vence_en || "—")}</td>
+                <td>${escaparHTML(oferta.fecha_respuesta || "—")}</td>
+                <td>${oferta.estado === "Pendiente" ? `<button class="btn btn-outline-danger btn-sm" data-cancelar-oferta="${escaparHTML(oferta.oferta_id)}">Cancelar</button>` : (oferta.cita_id ? `Cita #${escaparHTML(oferta.cita_id)}` : "—")}</td>
+            </tr>`;
+        }).join("");
+    } catch (error) {
+        tbody.innerHTML = `<tr><td colspan="7" class="text-danger">${escaparHTML(error.message)}</td></tr>`;
+    }
+}
 
 /**
  * Inscribe a un paciente (buscado por documento) en la lista de espera.
@@ -1236,10 +1344,14 @@ async function inscribirEnListaEspera(formulario, datos) {
 
     const cuerpo = {
         documento,
-        prioridad: PRIORIDAD_FORM_A_API[datos.prioridad] || "Media"
+        prioridad: PRIORIDAD_FORM_A_API[datos.prioridad] || "Media",
+        franja_horaria: datos.franja_horaria || "Cualquiera"
     };
-    // En el HTML el select se llama especialidad_id, pero el backend espera especialidad_requerida.
     if (datos.especialidad_id) cuerpo.especialidad_requerida = datos.especialidad_id;
+    if (datos.sede_id) cuerpo.sede_id = Number(datos.sede_id);
+    if (datos.medico_preferido_id) cuerpo.medico_preferido_id = Number(datos.medico_preferido_id);
+    if (datos.fecha_desde) cuerpo.fecha_desde = datos.fecha_desde;
+    if (datos.fecha_hasta) cuerpo.fecha_hasta = datos.fecha_hasta;
 
     try {
         const respuesta = await api("/lista-espera", { method: "POST", body: JSON.stringify(cuerpo) });
@@ -1269,26 +1381,37 @@ async function actualizarListaEspera(id, cambios) {
 
 // Botones de la tabla. Es un listener aparte: el de app.js ignora acciones que no conoce.
 document.addEventListener("click", async (evento) => {
+    const cancelarOferta = evento.target.closest("[data-cancelar-oferta]");
+    if (cancelarOferta) {
+        if (!window.confirm("¿Cancelar esta oferta y ofrecer el turno al siguiente paciente compatible?")) return;
+        cancelarOferta.disabled = true;
+        try {
+            const respuesta = await api(`/lista-espera/ofertas/${encodeURIComponent(cancelarOferta.dataset.cancelarOferta)}/cancelar`, { method: "POST" });
+            mostrarAlerta(respuesta.mensaje, "success");
+        } catch (error) {
+            mostrarAlerta(error.message, "danger");
+        }
+        await Promise.all([cargarHistorialOfertas(), cargarListaEspera()]);
+        return;
+    }
+
     const boton = evento.target.closest("button[data-accion^='espera-']");
     if (!boton) return;
     const id = boton.dataset.esperaId;
 
     switch (boton.dataset.accion) {
-        case "espera-asignar":
-            actualizarListaEspera(id, { estado_espera: "Asignado" });
-            break;
         case "espera-expirar":
             actualizarListaEspera(id, { estado_espera: "Expirado" });
             break;
         case "espera-eliminar":
-            if (!window.confirm("¿Eliminar esta entrada de la lista de espera?")) return;
+            if (!window.confirm("¿Retirar esta inscripción de la lista de espera? Se conservará el historial de ofertas.")) return;
             try {
                 const respuesta = await api(`/lista-espera/${encodeURIComponent(id)}`, { method: "DELETE" });
                 mostrarAlerta(respuesta.mensaje, "success");
             } catch (error) {
                 mostrarAlerta(error.message, "danger");
             }
-            cargarListaEspera();
+            await Promise.all([cargarListaEspera(), cargarHistorialOfertas()]);
             break;
     }
 });
@@ -1306,6 +1429,23 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!document.getElementById("tabla-espera")) return;
     llenarEspecialidadesListaEspera();
     cargarListaEspera();
+    cargarHistorialOfertas();
+    document.getElementById("btn-recargar-espera")?.addEventListener("click", cargarListaEspera);
+    document.getElementById("btn-filtrar-espera")?.addEventListener("click", cargarListaEspera);
+    document.getElementById("btn-recargar-historial-espera")?.addEventListener("click", cargarHistorialOfertas);
+    document.getElementById("btn-limpiar-filtros-espera")?.addEventListener("click", () => {
+        ["filtro-espera-q", "filtro-espera-especialidad", "filtro-espera-sede", "filtro-espera-desde", "filtro-espera-hasta"].forEach((id) => {
+            const campo = document.getElementById(id);
+            if (campo) campo.value = "";
+        });
+        cargarListaEspera();
+    });
+    document.getElementById("filtro-espera-q")?.addEventListener("keydown", (evento) => {
+        if (evento.key === "Enter") {
+            evento.preventDefault();
+            cargarListaEspera();
+        }
+    });
 });
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -1361,4 +1501,144 @@ document.addEventListener("DOMContentLoaded", () => {
     if (fechaInput && fechaInput.value) {
         cargarAgendaMedico();
     }
+});
+
+// ============================================================
+// LISTA DE ESPERA: PACIENTE Y OFERTAS
+// ============================================================
+async function cargarMedicosPreferidosEspera(medicoActual) {
+    const select = document.getElementById("espera-medico");
+    const especialidad = document.getElementById("especialidad")?.value;
+    if (!select) return;
+    select.innerHTML = '<option value="">Cualquier médico</option>';
+    if (!especialidad) return;
+    try {
+        const { medicos = [] } = await api(`/medicos?especialidad=${encodeURIComponent(especialidad)}`);
+        medicos.forEach((medico) => {
+            const opcion = document.createElement("option");
+            opcion.value = medico.medico_id;
+            opcion.textContent = medico.nombre_completo;
+            opcion.selected = String(medico.medico_id) === String(medicoActual);
+            select.appendChild(opcion);
+        });
+    } catch (error) {
+        console.warn("No se pudieron cargar médicos para la lista de espera:", error.message);
+    }
+}
+
+async function inscribirDesdeAgendamiento() {
+    const especialidad = document.getElementById("especialidad")?.value;
+    const medico = document.getElementById("espera-medico")?.value;
+    const sede = document.getElementById("sede")?.value;
+    const fechaDesde = document.getElementById("espera-fecha-desde")?.value;
+    const fechaHasta = document.getElementById("espera-fecha-hasta")?.value;
+    const franja = document.getElementById("espera-franja")?.value || "Cualquiera";
+    const boton = document.getElementById("btn-inscribir-espera-agendar");
+    if (!especialidad || !fechaDesde) {
+        mostrarAlerta("Selecciona una especialidad y una fecha para inscribirte.", "warning");
+        return;
+    }
+    if (fechaHasta && fechaHasta < fechaDesde) {
+        mostrarAlerta("La fecha final no puede ser anterior a la inicial.", "warning");
+        return;
+    }
+    if (boton) boton.disabled = true;
+    try {
+        const cuerpo = {
+            especialidad_requerida: especialidad,
+            fecha_desde: fechaDesde,
+            fecha_hasta: fechaHasta || fechaDesde,
+            franja_horaria: franja
+        };
+        if (sede) cuerpo.sede_id = Number(sede);
+        if (medico) cuerpo.medico_preferido_id = Number(medico);
+        const respuesta = await api("/lista-espera/me", { method: "POST", body: JSON.stringify(cuerpo) });
+        mostrarAlerta(respuesta.mensaje, "success");
+        document.getElementById("panel-lista-espera-agendar")?.classList.add("d-none");
+    } catch (error) {
+        mostrarAlerta(error.message, "danger");
+    } finally {
+        if (boton) boton.disabled = false;
+    }
+}
+
+async function cargarListaEsperaPaciente() {
+    const contenedor = document.getElementById("contenido-lista-espera-paciente");
+    if (!contenedor) return;
+    try {
+        const { lista_espera = [] } = await api("/lista-espera/me");
+        if (!lista_espera.length) {
+            contenedor.innerHTML = '<p class="text-muted small mb-0">No tienes solicitudes activas. Cuando no encuentres disponibilidad, puedes inscribirte desde Agendar cita.</p>';
+            return;
+        }
+        contenedor.innerHTML = lista_espera.map((item) => {
+            const fechaPreferida = item.fecha_desde || item.fecha_hasta
+                ? `${escaparHTML(item.fecha_desde || "Sin inicio")} – ${escaparHTML(item.fecha_hasta || "Sin límite")}`
+                : "Cualquier fecha";
+            const franja = ({ Manana: "Mañana", Tarde: "Tarde", Cualquiera: "Cualquier horario" })[item.franja_horaria] || "Cualquier horario";
+            const oferta = item.estado_espera === "Ofertado" && item.oferta_id
+                ? `<div class="alert alert-warning mt-3 mb-2"><strong>¡Tienes una oferta de turno!</strong><br>${escaparHTML(item.oferta_fecha)} a las ${escaparHTML(item.oferta_hora)} · ${escaparHTML(item.oferta_medico || "Médico disponible")}<br><small>Vence: ${escaparHTML(item.oferta_vence_en || "")}</small><div class="d-flex gap-2 mt-2"><button class="btn btn-success btn-sm" data-espera-oferta="${escaparHTML(item.oferta_id)}" data-decision="ACEPTAR">Aceptar turno</button><button class="btn btn-outline-secondary btn-sm" data-espera-oferta="${escaparHTML(item.oferta_id)}" data-decision="RECHAZAR">Rechazar</button></div></div>`
+                : `<p class="small text-muted mb-2">Posición aproximada: ${item.posicion ? `#${escaparHTML(item.posicion)}` : "Pendiente"}</p>`;
+            return `<article class="border rounded-3 p-3 mb-3">
+                <div class="d-flex flex-wrap justify-content-between gap-2"><strong>${escaparHTML(item.especialidad_requerida)}</strong><span class="badge ${item.estado_espera === "Ofertado" ? "bg-warning text-dark" : "bg-secondary"}">${escaparHTML(item.estado_espera)}</span></div>
+                <p class="small text-muted mb-1">${escaparHTML(item.sede || "Cualquier sede")} · ${escaparHTML(item.medico_preferido || "Cualquier médico")}</p>
+                <p class="small text-muted mb-1">${fechaPreferida} · ${escaparHTML(franja)}</p>
+                ${oferta}
+                ${["Activo", "Ofertado"].includes(item.estado_espera) ? `<button class="btn btn-outline-danger btn-sm" data-espera-retirar="${escaparHTML(item.espera_id)}">Retirarme de la lista</button>` : ""}
+            </article>`;
+        }).join("");
+    } catch (error) {
+        contenedor.innerHTML = `<p class="text-danger small">${escaparHTML(error.message)}</p>`;
+    }
+}
+
+async function responderOfertaDesdePortal(ofertaId, decision) {
+    const alerta = document.getElementById("alerta-espera-paciente");
+    try {
+        const respuesta = await api(`/lista-espera/ofertas/${encodeURIComponent(ofertaId)}/responder`, {
+            method: "POST", body: JSON.stringify({ decision })
+        });
+        if (alerta) {
+            alerta.className = "alert alert-success";
+            alerta.textContent = respuesta.mensaje;
+            alerta.classList.remove("d-none");
+        }
+    } catch (error) {
+        if (alerta) {
+            alerta.className = "alert alert-danger";
+            alerta.textContent = error.message;
+            alerta.classList.remove("d-none");
+        }
+    }
+    await cargarListaEsperaPaciente();
+    if (document.getElementById("kpi-espera")) numerosDelKpi();
+}
+
+document.addEventListener("click", async (evento) => {
+    const botonOferta = evento.target.closest("[data-espera-oferta]");
+    if (botonOferta) {
+        await responderOfertaDesdePortal(botonOferta.dataset.esperaOferta, botonOferta.dataset.decision);
+        return;
+    }
+    const botonRetirar = evento.target.closest("[data-espera-retirar]");
+    if (botonRetirar) {
+        if (!window.confirm("¿Quieres retirarte de esta lista de espera?")) return;
+        try {
+            const respuesta = await api(`/lista-espera/me/${encodeURIComponent(botonRetirar.dataset.esperaRetirar)}`, { method: "DELETE" });
+            const alerta = document.getElementById("alerta-espera-paciente");
+            if (alerta) {
+                alerta.className = "alert alert-success";
+                alerta.textContent = respuesta.mensaje;
+                alerta.classList.remove("d-none");
+            }
+            await cargarListaEsperaPaciente();
+            if (document.getElementById("kpi-espera")) numerosDelKpi();
+        } catch (error) {
+            mostrarAlerta(error.message, "danger");
+        }
+    }
+});
+
+document.addEventListener("click", (evento) => {
+    if (evento.target.closest("#btn-inscribir-espera-agendar")) inscribirDesdeAgendamiento();
 });

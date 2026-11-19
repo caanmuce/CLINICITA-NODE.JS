@@ -4,6 +4,9 @@ import numpy as np
 import pandas as pd
 from typing import Any, Dict, List
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ModelPredictor:
@@ -15,6 +18,7 @@ class ModelPredictor:
         artifact = joblib.load(model_path)
         self.model = artifact['model']
         self.feature_names = artifact['feature_names']
+        self.feature_encoders = artifact.get('feature_encoders', {})
         self.model_metadata = {
             'run_id': artifact['run_id'],
             'auc': artifact['auc'],
@@ -26,7 +30,11 @@ class ModelPredictor:
     def predict(self, features: pd.Series) -> Dict[str, Any]:
         """Predice riesgo para un paciente"""
         # Alinear features
-        X = pd.DataFrame([features])[self.feature_names].fillna(-1)
+        feature_data = features.to_dict()
+        for column, encoder in self.feature_encoders.items():
+            if column in feature_data:
+                feature_data[column] = encoder.get(str(feature_data[column]), -1)
+        X = pd.DataFrame([feature_data]).reindex(columns=self.feature_names).fillna(-1)
 
         # Probabilidad
         prob = self.model.predict_proba(X)[0, 1]
