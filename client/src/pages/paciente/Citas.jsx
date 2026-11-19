@@ -13,8 +13,19 @@ const formatDate = (dateStr) => {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
+    timeZone: 'America/Bogota'
+  });
+};
+
+const formatTime = (timeStr) => {
+  if (!timeStr) return '—';
+  const [hours, minutes] = timeStr.split(':');
+  const date = new Date();
+  date.setHours(parseInt(hours), parseInt(minutes));
+  return date.toLocaleTimeString('es-CO', {
     hour: '2-digit',
     minute: '2-digit',
+    hour12: false,
     timeZone: 'America/Bogota'
   });
 };
@@ -30,42 +41,47 @@ const formatDateShort = (dateStr) => {
   });
 };
 
+// Backend devuelve estados en Title Case: 'Confirmada', 'Pendiente', 'Completada', 'Cancelada', 'No-Asistio'
 const getEstadoColor = (estado) => {
   switch (estado) {
-    case 'confirmada': return 'bg-green-100 text-green-800';
-    case 'pendiente': return 'bg-yellow-100 text-yellow-800';
-    case 'completada': return 'bg-blue-100 text-blue-800';
-    case 'cancelada': return 'bg-red-100 text-red-800';
+    case 'Confirmada': return 'bg-green-100 text-green-800';
+    case 'Pendiente': return 'bg-yellow-100 text-yellow-800';
+    case 'Completada': return 'bg-blue-100 text-blue-800';
+    case 'Cancelada': return 'bg-red-100 text-red-800';
+    case 'No-Asistio': return 'bg-gray-100 text-gray-800';
     default: return 'bg-gray-100 text-gray-800';
   }
 };
 
 const getEstadoLabel = (estado) => {
   switch (estado) {
-    case 'confirmada': return 'Confirmada';
-    case 'pendiente': return 'Pendiente';
-    case 'completada': return 'Completada';
-    case 'cancelada': return 'Cancelada';
+    case 'Confirmada': return 'Confirmada';
+    case 'Pendiente': return 'Pendiente';
+    case 'Completada': return 'Completada';
+    case 'Cancelada': return 'Cancelada';
+    case 'No-Asistio': return 'No asistió';
     default: return estado;
   }
 };
 
 const getEstadoIcon = (estado) => {
   switch (estado) {
-    case 'confirmada': return <CheckCircle className='h-4 w-4' />;
-    case 'pendiente': return <Clock className='h-4 w-4' />;
-    case 'completada': return <CheckCircle className='h-4 w-4' />;
-    case 'cancelada': return <XCircle className='h-4 w-4' />;
+    case 'Confirmada': return <CheckCircle className='h-4 w-4' />;
+    case 'Pendiente': return <Clock className='h-4 w-4' />;
+    case 'Completada': return <CheckCircle className='h-4 w-4' />;
+    case 'Cancelada': return <XCircle className='h-4 w-4' />;
+    case 'No-Asistio': return <AlertCircle className='h-4 w-4' />;
     default: return <AlertCircle className='h-4 w-4' />;
   }
 };
 
 const ESTADOS_OPTIONS = [
   { value: '', label: 'Todos los estados' },
-  { value: 'pendiente', label: 'Pendiente' },
-  { value: 'confirmada', label: 'Confirmada' },
-  { value: 'completada', label: 'Completada' },
-  { value: 'cancelada', label: 'Cancelada' },
+  { value: 'Pendiente', label: 'Pendiente' },
+  { value: 'Confirmada', label: 'Confirmada' },
+  { value: 'Completada', label: 'Completada' },
+  { value: 'Cancelada', label: 'Cancelada' },
+  { value: 'No-Asistio', label: 'No asistió' },
 ];
 
 export const PacienteCitas = () => {
@@ -103,7 +119,7 @@ export const PacienteCitas = () => {
     try {
       await citasApi.cancelar(citaId);
       setCitas(prev => prev.map(cita => 
-        cita.id === citaId ? { ...cita, estado: 'cancelada' } : cita
+        (cita.cita_id || cita.id) === citaId ? { ...cita, estado: 'Cancelada' } : cita
       ));
     } catch (err) {
       console.error('Error cancelando cita:', err);
@@ -116,9 +132,9 @@ export const PacienteCitas = () => {
 
   const citasFiltradas = citas.filter(cita => {
     const matchesSearch = !searchTerm || 
-      (cita.medico_nombre && cita.medico_nombre.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (cita.especialidad_nombre && cita.especialidad_nombre.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (cita.sede_nombre && cita.sede_nombre.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (cita.medico && cita.medico.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (cita.especialidad && cita.especialidad.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (cita.sede && cita.sede.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (cita.motivo && cita.motivo.toLowerCase().includes(searchTerm.toLowerCase()));
     
     const matchesEstado = !estadoFilter || cita.estado === estadoFilter;
@@ -126,16 +142,23 @@ export const PacienteCitas = () => {
     return matchesSearch && matchesEstado;
   });
 
+  // Helper to combine fecha and hora into a Date for comparison
+  const getCitaDateTime = (cita) => {
+    if (cita.fecha_hora) return new Date(cita.fecha_hora).getTime();
+    if (cita.fecha && cita.hora) return new Date(`${cita.fecha}T${cita.hora}:00`).getTime();
+    return 0;
+  };
+
   // eslint-disable-next-line react-hooks/purity -- Date.now() is acceptable for current timestamp in render
   const nowTimestamp = Date.now();
 
   const citasProximas = citasFiltradas
-    .filter(c => ['pendiente', 'confirmada'].includes(c.estado) && new Date(c.fecha_hora).getTime() >= nowTimestamp)
-    .sort((a, b) => new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime());
+    .filter(c => ['Pendiente', 'Confirmada'].includes(c.estado) && getCitaDateTime(c) >= nowTimestamp)
+    .sort((a, b) => getCitaDateTime(a) - getCitaDateTime(b));
 
   const citasHistorial = citasFiltradas
-    .filter(c => ['completada', 'cancelada'].includes(c.estado) || new Date(c.fecha_hora).getTime() < nowTimestamp)
-    .sort((a, b) => new Date(b.fecha_hora).getTime() - new Date(a.fecha_hora).getTime());
+    .filter(c => ['Completada', 'Cancelada', 'No-Asistio'].includes(c.estado) || getCitaDateTime(c) < nowTimestamp)
+    .sort((a, b) => getCitaDateTime(b) - getCitaDateTime(a));
 
   if (loading) {
     return (
@@ -222,24 +245,24 @@ export const PacienteCitas = () => {
               </thead>
               <tbody className='divide-y divide-gray-200'>
                 {citasProximas.map((cita) => (
-                  <tr key={cita.id} className='hover:bg-gray-50'>
+                  <tr key={cita.cita_id || cita.id} className='hover:bg-gray-50'>
                     <td className='px-4 py-4'>
                       <div className='flex items-center gap-2 text-gray-900'>
                         <Calendar className='h-4 w-4 text-gray-400' />
-                        <span>{formatDate(cita.fecha_hora)}</span>
+                        <span>{cita.fecha ? formatDate(cita.fecha) : '—'} {cita.hora ? formatTime(cita.hora) : ''}</span>
                       </div>
                     </td>
                     <td className='px-4 py-4'>
                       <div className='flex items-center gap-2'>
                         <User className='h-4 w-4 text-gray-400' />
-                        <span className='font-medium'>{cita.medico_nombre || '—'}</span>
+                        <span className='font-medium'>{cita.medico || '—'}</span>
                       </div>
                     </td>
-                    <td className='px-4 py-4'>{cita.especialidad_nombre || '—'}</td>
+                    <td className='px-4 py-4'>{cita.especialidad || '—'}</td>
                     <td className='px-4 py-4'>
                       <div className='flex items-center gap-2'>
                         <MapPin className='h-4 w-4 text-gray-400' />
-                        <span>{cita.sede_nombre || '—'}</span>
+                        <span>Sede por confirmar</span>
                       </div>
                     </td>
                     <td className='px-4 py-4'>
@@ -303,24 +326,24 @@ export const PacienteCitas = () => {
               </thead>
               <tbody className='divide-y divide-gray-200'>
                 {citasHistorial.map((cita) => (
-                  <tr key={cita.id} className='hover:bg-gray-50'>
+                  <tr key={cita.cita_id || cita.id} className='hover:bg-gray-50'>
                     <td className='px-4 py-4'>
                       <div className='flex items-center gap-2 text-gray-900'>
                         <Calendar className='h-4 w-4 text-gray-400' />
-                        <span>{formatDateShort(cita.fecha_hora)}</span>
+                        <span>{cita.fecha ? formatDateShort(cita.fecha) : '—'} {cita.hora ? formatTime(cita.hora) : ''}</span>
                       </div>
                     </td>
                     <td className='px-4 py-4'>
                       <div className='flex items-center gap-2'>
                         <User className='h-4 w-4 text-gray-400' />
-                        <span>{cita.medico_nombre || '—'}</span>
+                        <span>{cita.medico || '—'}</span>
                       </div>
                     </td>
-                    <td className='px-4 py-4'>{cita.especialidad_nombre || '—'}</td>
+                    <td className='px-4 py-4'>{cita.especialidad || '—'}</td>
                     <td className='px-4 py-4'>
                       <div className='flex items-center gap-2'>
                         <MapPin className='h-4 w-4 text-gray-400' />
-                        <span>{cita.sede_nombre || '—'}</span>
+                        <span>Sede por confirmar</span>
                       </div>
                     </td>
                     <td className='px-4 py-4'>

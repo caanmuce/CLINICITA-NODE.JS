@@ -21,24 +21,46 @@ const formatDate = (dateStr) => {
   });
 };
 
+const formatTime = (timeStr) => {
+  if (!timeStr) return '—';
+  const [hours, minutes] = timeStr.split(':');
+  const date = new Date();
+  date.setHours(parseInt(hours), parseInt(minutes));
+  return date.toLocaleTimeString('es-PE', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+};
+
+// Backend devuelve estados en Title Case: 'Confirmada', 'Pendiente', 'Completada', 'Cancelada', 'No-Asistio'
 const getEstadoColor = (estado) => {
   switch (estado) {
-    case 'confirmada': return 'bg-green-100 text-green-800';
-    case 'pendiente': return 'bg-yellow-100 text-yellow-800';
-    case 'completada': return 'bg-blue-100 text-blue-800';
-    case 'cancelada': return 'bg-red-100 text-red-800';
+    case 'Confirmada': return 'bg-green-100 text-green-800';
+    case 'Pendiente': return 'bg-yellow-100 text-yellow-800';
+    case 'Completada': return 'bg-blue-100 text-blue-800';
+    case 'Cancelada': return 'bg-red-100 text-red-800';
+    case 'No-Asistio': return 'bg-gray-100 text-gray-800';
     default: return 'bg-gray-100 text-gray-800';
   }
 };
 
 const getEstadoLabel = (estado) => {
   switch (estado) {
-    case 'confirmada': return 'Confirmada';
-    case 'pendiente': return 'Pendiente';
-    case 'completada': return 'Completada';
-    case 'cancelada': return 'Cancelada';
+    case 'Confirmada': return 'Confirmada';
+    case 'Pendiente': return 'Pendiente';
+    case 'Completada': return 'Completada';
+    case 'Cancelada': return 'Cancelada';
+    case 'No-Asistio': return 'No asistió';
     default: return estado;
   }
+};
+
+// Helper to combine fecha and hora into a Date for comparison
+const getCitaDateTime = (cita) => {
+  if (cita.fecha_hora) return new Date(cita.fecha_hora).getTime();
+  if (cita.fecha && cita.hora) return new Date(`${cita.fecha}T${cita.hora}:00`).getTime();
+  return 0;
 };
 
 export const PacienteDashboard = () => {
@@ -67,11 +89,11 @@ export const PacienteDashboard = () => {
         const citasResponse = await citasApi.listarMisCitas();
         const citas = citasResponse.data || citasResponse || [];
         
-        // Filtrar citas futuras (pendiente, confirmada) y ordenar por fecha
+        // Filtrar citas futuras (Pendiente, Confirmada) y ordenar por fecha
         const ahora = new Date();
         const citasFuturas = citas
-          .filter(c => ['pendiente', 'confirmada'].includes(c.estado) && new Date(c.fecha_hora) >= ahora)
-          .sort((a, b) => new Date(a.fecha_hora) - new Date(b.fecha_hora));
+          .filter(c => ['Pendiente', 'Confirmada'].includes(c.estado) && getCitaDateTime(c) >= ahora.getTime())
+          .sort((a, b) => getCitaDateTime(a) - getCitaDateTime(b));
         
         setProximasCitas(citasFuturas.slice(0, 3));
 
@@ -83,8 +105,8 @@ export const PacienteDashboard = () => {
         finMes.setMonth(finMes.getMonth() + 1);
         
         const citasEsteMes = citas.filter(c => {
-          const fecha = new Date(c.fecha_hora);
-          return fecha >= inicioMes && fecha < finMes && c.estado !== 'cancelada';
+          const fecha = getCitaDateTime(c);
+          return fecha >= inicioMes.getTime() && fecha < finMes.getTime() && c.estado !== 'Cancelada';
         }).length;
 
         // Cargar lista de espera
@@ -125,8 +147,10 @@ export const PacienteDashboard = () => {
   const statCards = [
     { 
       title: 'Próxima cita', 
-      value: stats.proximaCita ? formatDate(stats.proximaCita.fecha_hora) : '—', 
-      subtitle: stats.proximaCita ? `${stats.proximaCita.medico_nombre || 'Médico'} • ${stats.proximaCita.especialidad_nombre || ''}` : 'Sin citas programadas', 
+      value: stats.proximaCita 
+        ? `${stats.proximaCita.fecha ? formatDate(stats.proximaCita.fecha) : '—'} ${stats.proximaCita.hora ? formatTime(stats.proximaCita.hora) : ''}` 
+        : '—', 
+      subtitle: stats.proximaCita ? `${stats.proximaCita.medico || 'Médico'} • ${stats.proximaCita.especialidad || ''}` : 'Sin citas programadas', 
       icon: Calendar, 
       color: 'text-blue-600', 
       bg: 'bg-blue-50', 
@@ -241,17 +265,17 @@ export const PacienteDashboard = () => {
         ) : (
           <div className="space-y-3">
             {proximasCitas.map((cita) => (
-              <div key={cita.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+              <div key={cita.cita_id || cita.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
                 <div className="flex items-center gap-4">
                   <div className="p-3 bg-indigo-100 rounded-lg">
                     <Calendar className="h-6 w-6 text-indigo-600" />
                   </div>
                   <div>
                     <p className="font-medium text-gray-900">
-                      {cita.medico_nombre || 'Médico'} • {cita.especialidad_nombre || 'Especialidad'}
+                      {cita.medico || 'Médico'} • {cita.especialidad || 'Especialidad'}
                     </p>
                     <p className="text-sm text-gray-500">
-                      {formatDate(cita.fecha_hora)} • {cita.sede_nombre || 'Sede'}
+                      {cita.fecha ? formatDate(cita.fecha) : '—'} {cita.hora ? formatTime(cita.hora) : ''} • {cita.sede || 'Sede por confirmar'}
                     </p>
                   </div>
                 </div>

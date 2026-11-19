@@ -2,9 +2,17 @@ import apiClient from './apiClient';
 
 export const horariosApi = {
   // GET /api/horarios (Slots disponibles para agendar)
+  // Backend devuelve: { horarios: ['08:00', '08:30', ...] }
+  // Frontend espera: [{ id, hora_inicio, hora_fin }, ...]
   obtenerDisponibles: async (medico, fecha) => {
     const response = await apiClient.get('/horarios', { params: { medico, fecha } });
-    return response.data;
+    const horarios = response.data.horarios || [];
+    // Transformar array de strings a array de objetos
+    return horarios.map((hora, index) => ({
+      id: `${medico}-${fecha}-${index}`,
+      hora_inicio: hora,
+      hora_fin: null, // No disponible en respuesta simple
+    }));
   },
 
   // GET /api/horarios/admin (Listar todos los horarios - Admin/Recep/Médico)

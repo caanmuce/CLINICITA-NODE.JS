@@ -26,9 +26,22 @@ export const listaEsperaApi = {
   },
 
   // GET /api/lista-espera/me (Paciente ve su lista de espera)
+  // Backend devuelve: { lista_espera: [{ espera_id, especialidad_requerida, sede, prioridad, fecha_inscripcion, posicion }, ...] }
+  // Frontend espera: [{ id, especialidad_nombre, prioridad, estado, motivo, fecha_inscripcion, posicion }, ...]
   listarMiLista: async () => {
     const response = await apiClient.get('/lista-espera/me');
-    return response.data;
+    const lista = response.data.lista_espera || [];
+    // Transformar campos del backend al formato que espera el frontend
+    return lista.map(item => ({
+      id: item.espera_id,
+      especialidad_nombre: item.especialidad_requerida,
+      sede_nombre: item.sede,
+      prioridad: item.prioridad, // Backend: 'Alta', 'Media', 'Baja'
+      estado: 'Activo', // Backend solo devuelve 'Activo', mapear a 'pendiente' para el frontend
+      motivo: null,
+      fecha_inscripcion: item.fecha_inscripcion,
+      posicion: item.posicion,
+    }));
   },
 
   // POST /api/lista-espera/me (Paciente se inscribe)

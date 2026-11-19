@@ -206,13 +206,12 @@ export const PacienteAgendarCita = () => {
 
     try {
       const hora = horarioSeleccionado?.hora_inicio || horarioSeleccionado?.hora;
-      const fechaHora = `${formData.fecha}T${hora}:00`;
 
       const citaData = {
         medico_id: formData.medico_id,
-        fecha_hora: fechaHora,
+        fecha: formData.fecha,
+        hora: hora,
         motivo: formData.motivo || 'Consulta médica',
-        sede_id: sedeMedico?.id,
       };
 
       await citasApi.crear(citaData);

@@ -5,10 +5,9 @@ import apiClient from '../api/apiClient';
 
 const AuthContext = createContext();
 
-// Claves de localStorage para sincronizar con el frontend legacy
-const LEGACY_TOKEN_KEY = 'clinicita_token';
-const LEGACY_USER_KEY = 'clinicita_usuario';
-const REACT_TOKEN_KEY = 'authToken';
+// Clave única de localStorage para el token (unificada)
+const TOKEN_KEY = 'authToken';
+const USER_KEY = 'clinicita_usuario';
 
 // Mapea la respuesta de /api/usuarios/me al formato que espera el frontend
 // Backend retorna: { usuario: { usuario_id, nombre_completo, correo, rol, paciente_id, medico_id, ... } }
@@ -37,39 +36,47 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   const clearAuthData = () => {
-    localStorage.removeItem(REACT_TOKEN_KEY);
-    localStorage.removeItem(LEGACY_TOKEN_KEY);
-    localStorage.removeItem(LEGACY_USER_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  };
+
+  // Refresca el usuario consultando /api/usuarios/me
+  // Útil después de editar perfil para actualizar el estado global
+  const refreshUser = async () => {
+    try {
+      const response = await apiClient.get('/usuarios/me');
+      const backendUser = response.data.usuario;
+      const userData = mapUserFromBackend(backendUser);
+      setUser(userData);
+      localStorage.setItem(USER_KEY, JSON.stringify(userData));
+      return userData;
+    } catch (error) {
+      console.error('Error refrescando usuario:', error);
+      // Si falla (ej. 401), limpiar auth
+      clearAuthData();
+      setUser(null);
+      setIsAuthenticated(false);
+      throw error;
+    }
   };
 
   // Check authentication status on mount
   useEffect(() => {
-    // Intentar leer el token de ambas claves para compatibilidad
-    const token = localStorage.getItem(LEGACY_TOKEN_KEY) || localStorage.getItem(REACT_TOKEN_KEY);
+    const token = localStorage.getItem(TOKEN_KEY);
     if (token) {
-      // Use the correct endpoint: /api/usuarios/me
       const checkAuth = async () => {
         try {
           const response = await apiClient.get('/usuarios/me');
-          // Backend response structure for /api/usuarios/me is { usuario: { ... } }
           const backendUser = response.data.usuario;
           const userData = mapUserFromBackend(backendUser);
           setUser(userData);
           setIsAuthenticated(true);
-          // Sincronizar claves legacy si no existen (ej. login hecho en React)
-          if (!localStorage.getItem(LEGACY_TOKEN_KEY)) {
-            localStorage.setItem(LEGACY_TOKEN_KEY, token);
-          }
-          if (!localStorage.getItem(LEGACY_USER_KEY)) {
-            localStorage.setItem(LEGACY_USER_KEY, JSON.stringify(userData));
-          }
-          // También sincronizar REACT_TOKEN_KEY
-          if (!localStorage.getItem(REACT_TOKEN_KEY)) {
-            localStorage.setItem(REACT_TOKEN_KEY, token);
+          // Sincronizar USER_KEY si no existe
+          if (!localStorage.getItem(USER_KEY)) {
+            localStorage.setItem(USER_KEY, JSON.stringify(userData));
           }
         } catch (error) {
           console.error('Authentication failed:', error);
-          // Token is invalid or expired
           clearAuthData();
           setIsAuthenticated(false);
           setUser(null);
@@ -79,17 +86,13 @@ export const AuthProvider = ({ children }) => {
       };
       checkAuth();
     } else {
-      // Use setTimeout to avoid synchronous setState in effect
       setTimeout(() => setLoading(false), 0);
     }
   }, []);
 
   const login = (token, userData) => {
-    // userData viene del login: { id, nombre, correo, rol }
-    // Guardar en todas las claves para compatibilidad con legacy
-    localStorage.setItem(REACT_TOKEN_KEY, token);
-    localStorage.setItem(LEGACY_TOKEN_KEY, token);
-    localStorage.setItem(LEGACY_USER_KEY, JSON.stringify(userData));
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(USER_KEY, JSON.stringify(userData));
     setUser(userData);
     setIsAuthenticated(true);
   };
@@ -98,12 +101,11 @@ export const AuthProvider = ({ children }) => {
     clearAuthData();
     setUser(null);
     setIsAuthenticated(false);
-    // Navegación SPA a la ruta de login de React
     window.location.href = '/login';
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, user, loading, login, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, user, loading, login, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

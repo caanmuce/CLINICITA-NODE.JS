@@ -26,14 +26,15 @@ export const usuariosApi = {
   },
 
   // GET /api/usuarios/me - Obtener perfil del usuario autenticado
+  // Backend devuelve: { usuario: { usuario_id, nombre_completo, correo, rol, paciente_id, medico_id, documento_id, telefono_whatsapp, direccion, fecha_nacimiento, genero, correo_electronico } }
   obtenerPerfil: async () => {
     const response = await apiClient.get('/usuarios/me');
-    return response.data;
+    return response.data.usuario || response.data;
   },
 
   // PUT /api/usuarios/me - Actualizar perfil del usuario autenticado
+  // El backend espera: nombres, apellidos, telefono, direccion
   actualizarPerfil: async (data) => {
-    // El backend espera: nombres, apellidos, telefono, direccion
     const response = await apiClient.put('/usuarios/me', data);
     return response.data;
   },

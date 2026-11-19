@@ -11,8 +11,7 @@ const apiClient = axios.create({
 // Interceptor de petición para adjuntar el token de autenticación
 apiClient.interceptors.request.use(
   (config) => {
-    // Intentar leer el token de ambas claves para compatibilidad con legacy
-    const token = localStorage.getItem('authToken') || localStorage.getItem('clinicita_token');
+    const token = localStorage.getItem('authToken');
     if (token) {
       config.headers['Authorization'] = `Bearer ${token}`;
     }
@@ -28,10 +27,8 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response && error.response.status === 401) {
-      // Limpiar ambas claves de token
       localStorage.removeItem('authToken');
-      localStorage.removeItem('clinicita_token');
-      // Redirigir al login si fuera necesario o dejar que el contexto lo maneje
+      localStorage.removeItem('clinicita_usuario');
     }
     return Promise.reject(error);
   }

@@ -19,8 +19,10 @@ const formatDate = (dateStr) => {
 };
 
 const getEstadoColor = (estado) => {
+  // Backend devuelve solo 'Activo' para la lista del paciente
+  // Mapear a estilos del frontend
   switch (estado) {
-    case "pendiente": return "bg-yellow-100 text-yellow-800";
+    case "Activo": return "bg-yellow-100 text-yellow-800";
     case "confirmada": return "bg-green-100 text-green-800";
     case "atendida": return "bg-blue-100 text-blue-800";
     case "cancelada": return "bg-red-100 text-red-800";
@@ -30,7 +32,7 @@ const getEstadoColor = (estado) => {
 
 const getEstadoLabel = (estado) => {
   switch (estado) {
-    case "pendiente": return "Pendiente";
+    case "Activo": return "Pendiente";
     case "confirmada": return "Confirmada";
     case "atendida": return "Atendida";
     case "cancelada": return "Cancelada";
@@ -39,7 +41,12 @@ const getEstadoLabel = (estado) => {
 };
 
 const getPrioridadColor = (prioridad) => {
+  // Backend devuelve 'Alta', 'Media', 'Baja' (Title Case)
   switch (prioridad) {
+    case "Alta": return "bg-red-100 text-red-800";
+    case "Media": return "bg-blue-100 text-blue-800";
+    case "Baja": return "bg-green-100 text-green-800";
+    // Compatibilidad con valores legacy lowercase
     case "alta": return "bg-red-100 text-red-800";
     case "normal": return "bg-blue-100 text-blue-800";
     case "baja": return "bg-green-100 text-green-800";
@@ -49,6 +56,9 @@ const getPrioridadColor = (prioridad) => {
 
 const getPrioridadLabel = (prioridad) => {
   switch (prioridad) {
+    case "Alta": return "Alta";
+    case "Media": return "Normal";
+    case "Baja": return "Baja";
     case "alta": return "Alta";
     case "normal": return "Normal";
     case "baja": return "Baja";
@@ -58,7 +68,9 @@ const getPrioridadLabel = (prioridad) => {
 
 const getPrioridadIcon = (prioridad) => {
   switch (prioridad) {
+    case "Alta":
     case "alta": return <ArrowUp className="h-4 w-4" />;
+    case "Baja":
     case "baja": return <ArrowDown className="h-4 w-4" />;
     default: return <Clock className="h-4 w-4" />;
   }
@@ -96,9 +108,10 @@ export const PacienteListaEspera = () => {
   const cargarEspecialidades = async () => {
     try {
       const { medicosApi } = await import("../../api/medicos");
-      const response = await medicosApi.listar({ solo_especialidades: true });
+      const response = await medicosApi.listarEspecialidades();
       const data = response.data || response || [];
-      setEspecialidades(Array.isArray(data) ? data : []);
+      // listarEspecialidades ya devuelve array de { nombre }
+      setEspecialidades(Array.isArray(data) ? data.map(e => ({ especialidad_id: e.nombre, nombre: e.nombre })) : []);
     } catch (err) {
       console.warn("No se pudieron cargar especialidades:", err);
     }
