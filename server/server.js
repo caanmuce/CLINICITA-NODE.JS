@@ -330,7 +330,10 @@ app.post("/api/auth/login", async (req, res) => {
 
 app.post("/api/auth/registro", async (req, res) => {
     const { nombres, apellidos, correo, clave, documento, telefono, habeas } = req.body;
-    if (!nombres || !apellidos || !correo || !clave || !documento || !telefono || !habeas) {
+    // CAMBIO (documento): se recorta el documento antes de validar. Un espacio al inicio
+    // hacía que "123" y " 123" se guardaran como dos pacientes distintos.
+    const documentoLimpio = String(documento ?? "").trim();
+    if (!nombres || !apellidos || !correo || !clave || !documentoLimpio || !telefono || !habeas) {
         return res.status(400).json({ mensaje: "Completa todos los campos obligatorios" });
     }
 
@@ -342,7 +345,7 @@ app.post("/api/auth/registro", async (req, res) => {
         const patientResult = await query(
             `INSERT INTO pacientes (nombre_completo, documento_id, telefono_whatsapp, correo_electronico, acepta_politica_datos)
              VALUES (?, ?, ?, ?, 1)`,
-            [`${nombres.trim()} ${apellidos.trim()}`, documento.trim(), telefono.trim(), email]
+            [`${nombres.trim()} ${apellidos.trim()}`, documentoLimpio, telefono.trim(), email]
         );
         await query(
             `INSERT INTO usuarios (nombre_completo, correo, clave_hash, rol, paciente_id)
@@ -761,6 +764,11 @@ app.post("/api/usuarios", requireAuth, requireRole("administrador"), validar(sch
     // CAMBIO (admin, Opción A): además de la cuenta, crea la fila en `pacientes` o `medicos`.
     // Antes el paciente quedaba sin paciente_id y no podía agendar.
     const { nombre_completo, correo, clave, rol, documento, telefono, especialidad, paciente_id, medico_id } = req.validated;
+    // CAMBIO (documento): se recorta antes de guardar y de validar. Así "  123" y "123" son el mismo documento.
+    const documentoLimpio = typeof documento === "string" ? documento.trim() : undefined;
+    if (documentoLimpio !== undefined && documentoLimpio.length < 5) {
+        return res.status(400).json({ mensaje: "El documento debe tener al menos 5 caracteres (sin contar espacios)" });
+    }
     const email = correo.trim().toLowerCase();
     const nombre = nombre_completo.trim();
     let pacienteCreado = null;
@@ -768,7 +776,7 @@ app.post("/api/usuarios", requireAuth, requireRole("administrador"), validar(sch
     try {
         // Reglas por rol: paciente -> documento y teléfono (o un paciente_id existente);
         // médico -> especialidad activa (o un medico_id existente).
-        if (rol === "paciente" && !paciente_id && !(documento && telefono)) {
+        if (rol === "paciente" && !paciente_id && !(documentoLimpio && telefono)) {
             return res.status(400).json({ mensaje: "Un paciente necesita documento y teléfono" });
         }
         if (rol === "medico" && !medico_id) {
@@ -786,7 +794,7 @@ app.post("/api/usuarios", requireAuth, requireRole("administrador"), validar(sch
             const r = await query(
                 `INSERT INTO pacientes (nombre_completo, documento_id, telefono_whatsapp, correo_electronico, acepta_politica_datos)
                  VALUES (?, ?, ?, ?, 1)`,
-                [nombre, documento, telefono.replace(/[\s-]/g, ""), email]
+                [nombre, documentoLimpio, telefono.replace(/[\s-]/g, ""), email]
             );
             pid = pacienteCreado = r.insertId;
         }

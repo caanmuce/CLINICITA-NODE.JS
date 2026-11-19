@@ -254,7 +254,8 @@
                 rol: datos.rol
             };
             if (datos.rol === "paciente") {
-                cuerpo.documento = datos.documento;
+                // CAMBIO (documento): se recorta antes de enviar; los espacios cuentan como otro documento.
+                cuerpo.documento = (datos.documento || "").trim();
                 cuerpo.telefono = (datos.telefono || "").replace(/[\s-]/g, "");
             }
             if (datos.rol === "medico") cuerpo.especialidad = datos.especialidad;

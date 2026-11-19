@@ -84,16 +84,16 @@ El proyecto combina un frontend web responsive con un servidor **Node.js + Expre
 
 ## Tecnologías
 
-| Capa | Tecnologías |
-| --- | --- |
-| Frontend | HTML5, CSS3, JavaScript, Bootstrap 5, Bootstrap Icons |
-| Backend | Node.js, Express 5 |
-| ML Service | Python 3.11, FastAPI, XGBoost, scikit-learn, MLflow |
-| Persistencia | MySQL 8.0, `mysql2` (Node), `pymysql` (Python) |
+| Capa          | Tecnologías                                                  |
+| ------------- | ------------------------------------------------------------ |
+| Frontend      | HTML5, CSS3, JavaScript, Bootstrap 5, Bootstrap Icons        |
+| Backend       | Node.js, Express 5                                           |
+| ML Service    | Python 3.11, FastAPI, XGBoost, scikit-learn, MLflow          |
+| Persistencia  | MySQL 8.0, `mysql2` (Node), `pymysql` (Python)               |
 | Autenticación | Tokens HMAC, `crypto.scryptSync` y control de acceso por rol |
-| Mensajería | `whatsapp-web.js`, `qrcode-terminal`, `node-cron` |
-| IA opcional | Google Gemini mediante `@google/genai` |
-| Contenedores | Docker, Docker Compose |
+| Mensajería    | `whatsapp-web.js`, `qrcode-terminal`, `node-cron`            |
+| IA opcional   | Google Gemini mediante `@google/genai`                       |
+| Contenedores  | Docker, Docker Compose                                       |
 
 ## Requisitos
 
@@ -103,6 +103,91 @@ El proyecto combina un frontend web responsive con un servidor **Node.js + Expre
 - Google Chrome/Chromium disponible si se habilita WhatsApp Web.
 - **Docker y Docker Compose** (para servicio ML).
 - Python 3.11+ (si se ejecuta ML service sin Docker).
+
+## Módulos Admin y Médico
+
+Esta sección documenta lo implementado para los módulos de **administrador** y **médico**.
+
+### Requisitos para estos módulos
+
+- **Variables de base de datos en `.env`.** El servidor lee `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` y `DB_NAME`. Si tu usuario de MySQL tiene contraseña, debes definir `DB_PASSWORD`; de lo contrario, la conexión falla.
+
+  ```env
+  DB_HOST=localhost
+  DB_PORT=3306
+  DB_USER=root
+  DB_PASSWORD=tu_contraseña
+  DB_NAME=clinicitabd
+  ```
+
+- **Horarios por día.** El `bd.sql` incluye horarios de lunes a viernes. Las citas en un día sin horario definido son rechazadas por el trigger `trg_validar_horario_cita`. Para agendar sábados o domingos, agrega horarios a la tabla `horarios` para cada médico y sede.
+- **Codificación al importar.** Importa con `--default-character-set=utf8mb4` para que las tildes se guarden bien:
+
+  ```bash
+  mysql --default-character-set=utf8mb4 -u root -p < database/bd.sql
+  ```
+
+### Administrador
+
+| Función        | Qué hace                                              | Reglas                                                                                                                                                                                                                                                                                                                                         |
+| -------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Usuarios       | Crea, edita, activa y desactiva usuarios              | Un paciente necesita documento y teléfono. Un médico necesita una especialidad activa. Al crear un usuario también se crea su fila en `pacientes` o `medicos`. Desactivar un médico desactiva su fila. No puedes desactivarte ni eliminarte a ti mismo. Los documentos se recortan antes de guardar: `" 123"` y `"123"` son el mismo paciente. |
+| Horarios       | Crea, edita y elimina horarios por médico, sede y día | No puede traslaparse con otro horario del mismo médico y día, en ninguna sede. La hora de inicio debe ser anterior a la de fin.                                                                                                                                                                                                                |
+| Especialidades | Crea, edita (descripción y estado) y elimina          | Solo se elimina una especialidad sin médicos asociados.                                                                                                                                                                                                                                                                                        |
+| Reportes       | Indicadores del mes y ausentismo por especialidad     | Ausentismo = No-Asistio / (Completada + No-Asistio). Solo cuentan las citas ya resueltas.                                                                                                                                                                                                                                                      |
+
+### Médico
+
+| Función    | Qué hace                                                 | Reglas                                                                                                                                           |
+| ---------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Agenda     | Muestra las citas de un día, con los síntomas reportados | Sin fecha, muestra la agenda de hoy en la zona horaria de la clínica.                                                                            |
+| Asistencia | Marca **Asistió** (Completada) o **No asistió**          | Solo esos dos estados. No puede marcar citas canceladas ni futuras. Puede corregir entre esos dos estados. No puede marcar citas de otro médico. |
+
+### Seguridad de sesiones
+
+Cada petición revisa que la cuenta siga activa. Si un administrador desactiva una cuenta, sus tokens dejan de funcionar de inmediato.
+
+### Códigos de respuesta
+
+| Código | Cuándo                                                                                                                                       |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| 200    | Consulta o actualización correcta                                                                                                            |
+| 201    | Creación correcta                                                                                                                            |
+| 400    | Dato inválido o regla de negocio incumplida (documento faltante, inicio ≥ fin, especialidad inexistente, fecha inválida)                     |
+| 401    | Sesión inválida o cuenta desactivada                                                                                                         |
+| 403    | El rol no tiene permiso                                                                                                                      |
+| 404    | El recurso no existe o no pertenece al usuario                                                                                               |
+| 409    | Conflicto con un dato existente: correo o documento repetido, horario traslapado, horario idéntico, cita cancelada o futura, estado repetido |
+
+### Rutas nuevas o ajustadas
+
+| Método       | Ruta                                           | Rol                                  | Descripción                                                                         |
+| ------------ | ---------------------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------- |
+| GET          | `/api/usuarios`                                | administrador                        | Lista de usuarios (`?limit=`, `?page=`)                                             |
+| POST         | `/api/usuarios`                                | administrador                        | Crea usuario con su fila en `pacientes` o `medicos`                                 |
+| PUT          | `/api/usuarios/:id`                            | administrador                        | Actualiza datos, clave, rol, estado y especialidad                                  |
+| DELETE       | `/api/usuarios/:id`                            | administrador                        | Desactiva el usuario (no lo elimina)                                                |
+| GET / POST   | `/api/sedes`                                   | administrador                        | Lista y crea sedes                                                                  |
+| PUT / DELETE | `/api/sedes/:id`                               | administrador                        | Edita y elimina sedes                                                               |
+| GET          | `/api/horarios/admin`                          | administrador                        | Horarios de todos los médicos                                                       |
+| POST         | `/api/horarios/admin`                          | administrador                        | Crea horario (valida traslapes)                                                     |
+| PUT / DELETE | `/api/horarios/admin/:id`                      | administrador                        | Edita y elimina horario                                                             |
+| GET          | `/api/reportes/resumen`                        | administrador                        | Indicadores del mes para el panel                                                   |
+| GET / POST   | `/api/admin/especialidades`                    | administrador                        | Lista y crea especialidades                                                         |
+| PUT / DELETE | `/api/admin/especialidades/:id`                | administrador                        | Edita y elimina especialidades                                                      |
+| GET          | `/api/admin/reportes/ausentismo?desde=&hasta=` | administrador                        | Ausentismo por especialidad                                                         |
+| GET          | `/api/citas/medico?fecha=AAAA-MM-DD`           | medico                               | Agenda del médico (sin fecha = hoy)                                                 |
+| PUT          | `/api/citas/:id/estado`                        | medico, recepcionista, administrador | Cambia el estado de una cita. El médico solo puede usar `Completada` o `No-Asistio` |
+
+### Archivos de estos módulos
+
+- `server/server.js`: usuarios, sedes, horarios del administrador, resumen, agenda y asistencia del médico.
+- `server/rutas/admin.js`: especialidades y reporte de ausentismo.
+- `server/rutas/utilidades.js`: fechas de la clínica y verificación de cuenta activa.
+- `public/assets/js/admin.js`: pantallas del administrador.
+- `public/assets/js/medico.js`: agenda del médico.
+- `public/assets/js/panel-comun.js` y `public/assets/css/panel.css`: utilidades y estilos de los paneles.
+- `public/roles/admin/*.html` y `public/roles/medico/agenda.html`: pantallas.
 
 ## Instalación
 
@@ -255,16 +340,16 @@ docker compose up -d --build
 
 Las variables se configuran en `.env`, creado a partir de `.env.docker.example`:
 
-| Variable | Uso | Valor habitual |
-| --- | --- | --- |
-| `MYSQL_ROOT_PASSWORD` | Contraseña de MySQL | `clinicita123` |
-| `TOKEN_SECRET` | Firma de tokens de sesión | Cambiar en producción |
-| `BACKEND_HOST_PORT` | Puerto del backend | `3000` |
-| `ML_HOST_PORT` | Puerto público del servicio ML | `8000` |
-| `MLFLOW_HOST_PORT` | Puerto público de MLflow | `5000` |
-| `MYSQL_HOST_PORT` | Puerto público de MySQL | `3307` |
-| `ENABLE_WHATSAPP` | Activa WhatsApp | `false` |
-| `GEMINI_API_KEY` | Clave opcional de Gemini | Vacía |
+| Variable              | Uso                            | Valor habitual        |
+| --------------------- | ------------------------------ | --------------------- |
+| `MYSQL_ROOT_PASSWORD` | Contraseña de MySQL            | `clinicita123`        |
+| `TOKEN_SECRET`        | Firma de tokens de sesión      | Cambiar en producción |
+| `BACKEND_HOST_PORT`   | Puerto del backend             | `3000`                |
+| `ML_HOST_PORT`        | Puerto público del servicio ML | `8000`                |
+| `MLFLOW_HOST_PORT`    | Puerto público de MLflow       | `5000`                |
+| `MYSQL_HOST_PORT`     | Puerto público de MySQL        | `3307`                |
+| `ENABLE_WHATSAPP`     | Activa WhatsApp                | `false`               |
+| `GEMINI_API_KEY`      | Clave opcional de Gemini       | Vacía                 |
 
 El backend se conecta internamente a `http://ml-service:8000`; desde el navegador se usa `http://localhost:8000`. Por eso no se debe cambiar `ML_SERVICE_URL` a `localhost` dentro del contenedor backend.
 
@@ -306,12 +391,12 @@ La clave `GEMINI_API_KEY` es opcional. Si no está configurada, el sistema utili
 
 El servidor crea estos usuarios automáticamente al iniciar, si todavía no existen:
 
-| Rol | Correo | Contraseña |
-| --- | --- | --- |
-| Paciente | `paciente@clinicita.com` | `paciente123` |
-| Médico | `medico@clinicita.com` | `medico123` |
+| Rol           | Correo                    | Contraseña     |
+| ------------- | ------------------------- | -------------- |
+| Paciente      | `paciente@clinicita.com`  | `paciente123`  |
+| Médico        | `medico@clinicita.com`    | `medico123`    |
 | Recepcionista | `recepcion@clinicita.com` | `recepcion123` |
-| Administrador | `admin@clinicita.com` | `admin123` |
+| Administrador | `admin@clinicita.com`     | `admin123`     |
 
 Estas cuentas son únicamente para desarrollo y demostración. Deben cambiarse o eliminarse antes de usar el sistema en un entorno real.
 
@@ -379,45 +464,45 @@ Las rutas protegidas utilizan un token Bearer generado durante el inicio de sesi
 
 ### Autenticación y usuarios
 
-| Método | Ruta | Descripción |
-| --- | --- | --- |
-| `POST` | `/api/auth/login` | Inicia sesión por correo, contraseña y rol |
-| `POST` | `/api/auth/registro` | Registra un nuevo paciente |
-| `GET` | `/api/auth/me` | Consulta el usuario autenticado |
+| Método | Ruta                 | Descripción                                |
+| ------ | -------------------- | ------------------------------------------ |
+| `POST` | `/api/auth/login`    | Inicia sesión por correo, contraseña y rol |
+| `POST` | `/api/auth/registro` | Registra un nuevo paciente                 |
+| `GET`  | `/api/auth/me`       | Consulta el usuario autenticado            |
 
 ### Catálogo
 
-| Método | Ruta | Descripción |
-| --- | --- | --- |
-| `GET` | `/api/especialidades` | Lista especialidades disponibles |
-| `GET` | `/api/medicos` | Lista médicos, con filtro opcional por especialidad |
-| `GET` | `/api/horarios` | Consulta horarios libres de un médico |
+| Método | Ruta                  | Descripción                                         |
+| ------ | --------------------- | --------------------------------------------------- |
+| `GET`  | `/api/especialidades` | Lista especialidades disponibles                    |
+| `GET`  | `/api/medicos`        | Lista médicos, con filtro opcional por especialidad |
+| `GET`  | `/api/horarios`       | Consulta horarios libres de un médico               |
 
 ### Citas
 
-| Método | Ruta | Descripción |
-| --- | --- | --- |
+| Método | Ruta         | Descripción                                |
+| ------ | ------------ | ------------------------------------------ |
 | `POST` | `/api/citas` | Crea una cita para el paciente autenticado |
-| `GET` | `/api/citas` | Lista las citas del paciente autenticado |
+| `GET`  | `/api/citas` | Lista las citas del paciente autenticado   |
 
 ### ML No-Show Risk Score
 
-| Método | Ruta | Descripción | Roles |
-| --- | --- | --- | --- |
-| `GET` | `/api/pacientes/me/riesgo` | Riesgo del paciente autenticado | paciente |
-| `GET` | `/api/pacientes/:id/riesgo` | Riesgo de un paciente por ID | admin, recepcionista, medico |
-| `POST` | `/api/pacientes/riesgo/batch` | Riesgos en lote (máx 100 IDs) | admin, recepcionista |
-| `POST` | `/api/pacientes/riesgo/recalcular-todos` | Dispara recálculo masivo en background | admin |
+| Método | Ruta                                     | Descripción                            | Roles                        |
+| ------ | ---------------------------------------- | -------------------------------------- | ---------------------------- |
+| `GET`  | `/api/pacientes/me/riesgo`               | Riesgo del paciente autenticado        | paciente                     |
+| `GET`  | `/api/pacientes/:id/riesgo`              | Riesgo de un paciente por ID           | admin, recepcionista, medico |
+| `POST` | `/api/pacientes/riesgo/batch`            | Riesgos en lote (máx 100 IDs)          | admin, recepcionista         |
+| `POST` | `/api/pacientes/riesgo/recalcular-todos` | Dispara recálculo masivo en background | admin                        |
 
 ### ML Service API (FastAPI - puerto 8000)
 
-| Método | Ruta | Descripción |
-| --- | --- | --- |
-| `GET` | `/health` | Health check + modelo cargado |
-| `GET` | `/riesgo/{paciente_id}` | Score individual |
-| `POST` | `/riesgo/batch` | Scores en lote (máx 100) |
-| `POST` | `/train` | Reentrenamiento en background |
-| `POST` | `/recalcular-todos` | Recalcula y guarda scores de todos los pacientes |
+| Método | Ruta                    | Descripción                                      |
+| ------ | ----------------------- | ------------------------------------------------ |
+| `GET`  | `/health`               | Health check + modelo cargado                    |
+| `GET`  | `/riesgo/{paciente_id}` | Score individual                                 |
+| `POST` | `/riesgo/batch`         | Scores en lote (máx 100)                         |
+| `POST` | `/train`                | Reentrenamiento en background                    |
+| `POST` | `/recalcular-todos`     | Recalcula y guarda scores de todos los pacientes |
 
 ## ML No-Show Risk Score System
 
@@ -560,6 +645,7 @@ curl http://localhost:8000/health
 ```
 
 **Resultado esperado:**
+
 ```json
 {
   "status": "healthy",
@@ -575,10 +661,11 @@ curl http://localhost:8000/riesgo/1
 ```
 
 **Resultado esperado:**
+
 ```json
 {
   "paciente_id": 1,
-  "score": 85.50,
+  "score": 85.5,
   "percentil": 85,
   "nivel_riesgo": "Crítico",
   "features_principales": {
@@ -641,6 +728,7 @@ curl -X POST http://localhost:3000/api/pacientes/riesgo/recalcular-todos \
 ```
 
 **Resultado esperado:**
+
 ```json
 {
   "message": "Recálculo masivo iniciado",
@@ -672,15 +760,15 @@ curl -X POST http://localhost:3000/api/pacientes/riesgo/recalcular-todos \
 5. Verificar en logs y en la base de datos el canal registrado para pacientes Crítico/Alto. Si la migración automática del servidor está activa, puede aparecer `WhatsApp+SMS`.
 6. Verificar en BD:
    ```sql
-   SELECT canal_envio, estado_entrega, COUNT(*) 
-   FROM recordatorios 
+   SELECT canal_envio, estado_entrega, COUNT(*)
+   FROM recordatorios
    GROUP BY canal_envio, estado_entrega;
    ```
 
 #### 9. Verificar BD - Scores persistidos
 
 ```sql
-SELECT 
+SELECT
   pr.nivel_riesgo,
   COUNT(*) as total,
   AVG(pr.score) as score_promedio,
@@ -692,8 +780,9 @@ ORDER BY FIELD(pr.nivel_riesgo, 'Crítico', 'Alto', 'Medio', 'Bajo');
 ```
 
 **Resultado esperado aprox:**
+
 | nivel_riesgo | total | score_promedio | min_score | max_score |
-|--------------|-------|----------------|-----------|-----------|
+| ------------ | ----- | -------------- | --------- | --------- |
 | Crítico      | 72    | ~85            | 70        | 98        |
 | Alto         | 0     | -              | -         | -         |
 | Medio        | 0     | -              | -         | -         |
@@ -712,6 +801,7 @@ Abrir [http://localhost:5000](http://localhost:5000) → Experimento `clinicita-
 El flujo de autenticación, registro de pacientes, consulta de disponibilidad y agendamiento de citas está conectado al backend y MySQL. La interfaz incluye los paneles de los cuatro roles y las pantallas principales del sistema.
 
 **Sistema ML No-Show Risk Score: OPERATIVO** ✅
+
 - Entrenamiento automático en Docker
 - API de inferencia funcional
 - Integración completa Node.js ↔ FastAPI
@@ -726,6 +816,7 @@ Algunas vistas administrativas, médicas y de recepción mantienen marcadores `T
 ## Próximos Pasos (Roadmap)
 
 ### Fase 2: Mejora de Arquitectura del Modelo (Prioridad: MEDIA)
+
 - Feature engineering: ventanas rodantes (30/60/90 días), patrones estacionales, features de interacción
 - Re-habilitar Optuna para optimización de hiperparámetros
 - Probar algoritmos alternativos: LightGBM, CatBoost, Regresión Logística
@@ -733,6 +824,7 @@ Algunas vistas administrativas, médicas y de recepción mantienen marcadores `T
 - Re-habilitar calibración Platt (ahora hay datos suficientes)
 
 ### Fase 3: Hardening de Producción (Prioridad: MEDIA)
+
 - Versionado de modelos y A/B testing en serving
 - Detección de deriva (data drift) en features
 - Reentrenamiento programado (semanal/mensual)
@@ -740,6 +832,7 @@ Algunas vistas administrativas, médicas y de recepción mantienen marcadores `T
 - Monitoreo de latencia de predicción y alertas de performance
 
 ### Fase 4: UX Frontend (Prioridad: BAJA)
+
 - Tooltips con contribución SHAP por feature
 - Historial de riesgo por paciente (gráfico temporal)
 - Botón "Recalcular riesgo" por fila en tablas
