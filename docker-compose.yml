@@ -50,7 +50,8 @@ services:
       mlflow:
         condition: service_started
     volumes:
-      - ml_models:/models
+      # El modelo entrenado se mantiene fuera del repositorio público.
+      - ./private-models:/models:rw
 
   backend:
     build:
@@ -70,13 +71,24 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
       ENABLE_WHATSAPP: ${ENABLE_WHATSAPP:-false}
       ENABLE_WHATSAPP_CHATBOT: ${ENABLE_WHATSAPP_CHATBOT:-false}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash-lite}
+      DEVELOPER_MODE: ${DEVELOPER_MODE:-false}
+      OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-}
+      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://host.docker.internal:20128/v1}
       CLINIC_TIMEZONE: ${CLINIC_TIMEZONE:-America/Bogota}
       CLINIC_UTC_OFFSET: ${CLINIC_UTC_OFFSET:--05:00}
+      SMS_PROVIDER: ${SMS_PROVIDER:-mock}
+      SMS_GATEWAY_URL: ${SMS_GATEWAY_URL:-http://192.168.1.100:8080}
+      SMS_GATEWAY_USER: ${SMS_GATEWAY_USER:-sms}
+      SMS_GATEWAY_PASSWORD: ${SMS_GATEWAY_PASSWORD:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
       AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-50}
     ports:
       - "${BACKEND_HOST_PORT:-3000}:3000"
+    volumes:
+      # Conserva la sesión vinculada de WhatsApp entre recreaciones.
+      - whatsapp_auth:/app/server/.wwebjs_auth
     depends_on:
       mysql:
         condition: service_healthy
@@ -86,4 +98,4 @@ services:
 volumes:
   mysql_data:
   mlflow_data:
-  ml_models:
+  whatsapp_auth:

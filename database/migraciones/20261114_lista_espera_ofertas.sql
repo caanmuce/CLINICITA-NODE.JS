@@ -1,4 +1,4 @@
-use cln
+USE clinicitabd
 ALTER TABLE lista_espera
     MODIFY estado_espera ENUM('Activo','Ofertado','Asignado','Expirado','Cancelado') DEFAULT 'Activo',
     ADD COLUMN medico_preferido_id INT NULL AFTER sede_id,

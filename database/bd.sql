@@ -171,7 +171,7 @@ CREATE TABLE `lista_espera_ofertas` (
   UNIQUE KEY `uq_lista_espera_paciente_ofertado` (`espera_activa`),
   KEY `idx_lista_espera_ofertas_vencimiento` (`estado`, `vence_en`),
   KEY `idx_lista_espera_ofertas_paciente` (`paciente_id`, `estado`),
-  CONSTRAINT `fk_espera_oferta_espera` FOREIGN KEY (`espera_id`) REFERENCES `lista_espera` (`espera_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_espera_oferta_espera` FOREIGN KEY (`espera_id`) REFERENCES `lista_espera` (`espera_id`),
   CONSTRAINT `fk_espera_oferta_paciente` FOREIGN KEY (`paciente_id`) REFERENCES `pacientes` (`paciente_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_espera_oferta_medico` FOREIGN KEY (`medico_id`) REFERENCES `medicos` (`medico_id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_espera_oferta_sede` FOREIGN KEY (`sede_id`) REFERENCES `sedes` (`sede_id`) ON DELETE SET NULL,
@@ -184,7 +184,7 @@ CREATE TABLE `lista_espera_ofertas` (
 CREATE TABLE `recordatorios` (
   `recordatorio_id` int(11) NOT NULL AUTO_INCREMENT,
   `cita_id` int(11) NOT NULL,
-  `canal_envio` enum('WhatsApp','SMS','Email') DEFAULT 'WhatsApp',
+  `canal_envio` enum('WhatsApp','SMS','Email','WhatsApp+SMS') DEFAULT 'WhatsApp',
   `fecha_envio` datetime DEFAULT NULL,
   `estado_entrega` enum('Pendiente','Enviado','Entregado','Fallido') DEFAULT 'Pendiente',
   `respuesta_paciente` tinyint(1) DEFAULT NULL,
@@ -226,6 +226,19 @@ CREATE TABLE `tokens_recuperacion` (
   KEY `fk_tokens_usuario` (`usuario_id`),
   KEY `idx_tokens_expira` (`expira_en`),
   CONSTRAINT `fk_tokens_usuario` FOREIGN KEY (`usuario_id`) REFERENCES `usuarios` (`usuario_id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+-- Tabla `whatsapp_sesiones` (estado persistente de conversaciones y autorizaciones)
+-- --------------------------------------------------------
+CREATE TABLE `whatsapp_sesiones` (
+  `chat_id` varchar(255) NOT NULL,
+  `tipo` enum('conversacion','autorizacion') NOT NULL,
+  `payload` json NOT NULL,
+  `expira_en` datetime NOT NULL,
+  `actualizado_en` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`chat_id`),
+  KEY `idx_whatsapp_sesiones_expira` (`expira_en`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- --------------------------------------------------------
@@ -534,7 +547,7 @@ INSERT INTO pacientes (nombre_completo, documento_id, telefono_whatsapp, correo_
 ('María Torres', '1009876543', '3009876543', 'maria.torres@mail.com', 'Carrera 10 #20-45', '1985-08-22', 'F', 1),
 ('Carlos Ruiz', '1011121314', '3011121314', 'carlos.ruiz@mail.com', 'Av. 68 #40-50', '1992-03-10', 'M', 1);
 
--- Horarios de ejemplo (Lunes a Viernes 8:00-12:00 y 14:00-17:00, slots de 30 min)
+-- Horarios de ejemplo (Lunes a Viernes y Domingo, slots de 30 min)
 -- Dra. Laura Gómez (medico_id=1) - Sede Principal (sede_id=1)
 
 INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, duracion_slot, activo) VALUES
@@ -546,7 +559,8 @@ INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, dur
 (1, 1, 3, '14:00:00', '17:00:00', 30, 1), -- Miércoles tarde
 (1, 1, 4, '08:00:00', '12:00:00', 30, 1), -- Jueves mañana
 (1, 1, 4, '14:00:00', '17:00:00', 30, 1), -- Jueves tarde
-(1, 1, 5, '08:00:00', '12:00:00', 30, 1); -- Viernes mañana
+(1, 1, 5, '08:00:00', '12:00:00', 30, 1), -- Viernes mañana
+(1, 1, 0, '08:00:00', '12:00:00', 30, 1); -- Domingo mañana
 
 -- Dr. Andrés Rico (medico_id=2) - Sede Norte (sede_id=2)
 INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, duracion_slot, activo) VALUES
@@ -558,7 +572,8 @@ INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, dur
 (2, 2, 3, '14:00:00', '17:00:00', 30, 1),
 (2, 2, 4, '08:00:00', '12:00:00', 30, 1),
 (2, 2, 4, '14:00:00', '17:00:00', 30, 1),
-(2, 2, 5, '08:00:00', '12:00:00', 30, 1);
+(2, 2, 5, '08:00:00', '12:00:00', 30, 1),
+(2, 2, 0, '08:00:00', '12:00:00', 30, 1);
 
 -- Dra. María Torres (medico_id=3) - Sede Sur (sede_id=3)
 INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, duracion_slot, activo) VALUES
@@ -566,7 +581,8 @@ INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, dur
 (3, 3, 2, '08:00:00', '12:00:00', 30, 1),
 (3, 3, 3, '08:00:00', '12:00:00', 30, 1),
 (3, 3, 4, '08:00:00', '12:00:00', 30, 1),
-(3, 3, 5, '08:00:00', '12:00:00', 30, 1);
+(3, 3, 5, '08:00:00', '12:00:00', 30, 1),
+(3, 3, 0, '08:00:00', '12:00:00', 30, 1);
 
 -- Dr. Carlos Mendoza (medico_id=4) - Sede Principal (sede_id=1)
 INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, duracion_slot, activo) VALUES
@@ -579,7 +595,9 @@ INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, dur
 (4, 1, 4, '08:00:00', '12:00:00', 30, 1),
 (4, 1, 4, '14:00:00', '17:00:00', 30, 1),
 (4, 1, 5, '08:00:00', '12:00:00', 30, 1),
-(4, 1, 5, '14:00:00', '17:00:00', 30, 1);
+(4, 1, 5, '14:00:00', '17:00:00', 30, 1),
+(4, 1, 0, '08:00:00', '12:00:00', 30, 1),
+(4, 1, 0, '14:00:00', '17:00:00', 30, 1);
 
 -- Lista de espera de ejemplo
 INSERT INTO lista_espera (paciente_id, especialidad_requerida, sede_id, prioridad, estado_espera, observaciones) VALUES
@@ -591,3 +609,24 @@ INSERT INTO lista_espera (paciente_id, especialidad_requerida, sede_id, priorida
   SELECT COUNT(*) FROM medicos;
   SELECT COUNT(*) FROM sedes;
   select * from lista_espera;
+
+-- --------------------------------------------------------
+-- Migración idempotente: crear sesiones persistentes de WhatsApp en bases existentes
+CREATE TABLE IF NOT EXISTS `whatsapp_sesiones` (
+  `chat_id` varchar(255) NOT NULL,
+  `tipo` enum('conversacion','autorizacion') NOT NULL,
+  `payload` json NOT NULL,
+  `expira_en` datetime NOT NULL,
+  `actualizado_en` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`chat_id`),
+  KEY `idx_whatsapp_sesiones_expira` (`expira_en`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Migración: ampliar ENUM canal_envio en recordatorios
+-- Ejecutar en bases de datos ya desplegadas que aún tengan
+-- el ENUM original ('WhatsApp','SMS','Email').
+-- --------------------------------------------------------
+ALTER TABLE recordatorios
+  MODIFY COLUMN canal_envio
+    ENUM('WhatsApp','SMS','Email','WhatsApp+SMS')
+    DEFAULT 'WhatsApp';

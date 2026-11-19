@@ -8,47 +8,64 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="../../assets/css/estilos.css">
+    <!-- NUEVO: estilos de los paneles médico/admin -->
+    <link rel="stylesheet" href="../../assets/css/panel.css">
 </head>
-<body class="app-shell">
+<!-- NUEVO: data-pagina le dice a admin.js qué pantalla es esta -->
+<body class="app-shell" data-pagina="admin-especialidades">
 <div class="container-fluid">
     <div class="row">
         <aside class="col-lg-2 app-sidebar">
             <a class="navbar-brand-text d-block mb-4 text-decoration-none" href="../../index.html"><i class="bi bi-heart-pulse-fill me-1"></i>Clini<span>Cita</span></a>
-            <p class="small text-white-50 mb-3">Administrador</p>
+            <p class="small text-white-50 mb-2">Administrador</p>
+            <!-- NUEVO: panel-comun.js escribe aquí el nombre del usuario conectado -->
+            <div class="sidebar-usuario" id="sidebar-usuario"></div>
             <nav class="nav flex-column">
                 <a class="nav-link" href="dashboard.html"><i class="bi bi-speedometer2 me-2"></i>Panel</a>
                 <a class="nav-link" href="usuarios.html"><i class="bi bi-people me-2"></i>Usuarios</a>
                 <a class="nav-link active" href="especialidades.html"><i class="bi bi-heart-pulse me-2"></i>Especialidades</a>
                 <a class="nav-link" href="horarios.html"><i class="bi bi-clock me-2"></i>Horarios</a>
                 <a class="nav-link" href="reportes.html"><i class="bi bi-graph-up me-2"></i>Reportes</a>
-                <a class="nav-link" href="../../pages/login.html"><i class="bi bi-box-arrow-left me-2"></i>Salir</a>
+                <!-- CAMBIO: id="btn-logout" -> app.js ya sabe cerrar sesión (borra el token) con ese id -->
+                <a class="nav-link" id="btn-logout" href="../../pages/login.html"><i class="bi bi-box-arrow-left me-2"></i>Salir</a>
             </nav>
         </aside>
         <main class="col-lg-10 app-content">
-            <h1 class="h3 mb-4">Especialidades</h1>
+            <div class="panel-encabezado">
+                <div>
+                    <h1 class="h3 mb-0">Especialidades</h1>
+                    <p class="panel-subtitulo sin-capitalizar">Los pacientes solo ven las especialidades activas que tengan al menos un médico activo.</p>
+                </div>
+            </div>
             <div class="panel-card mb-4">
-                <div id="alerta-sistema" class="alert d-none" role="alert"></div>
-                <form data-form="especialidad" class="row g-2" method="post" action="#">
-                    <div class="col-md-5"><input class="form-control" name="nombre" placeholder="Nombre de la especialidad" required></div>
-                    <div class="col-md-5"><input class="form-control" name="descripcion" placeholder="Descripción"></div>
-                    <div class="col-md-2"><button class="btn btn-clinicita w-100" type="submit">Agregar</button></div>
+                <!-- CAMBIO: data-form="especialidad" -> data-admin-form (ver comentario en usuarios.html) -->
+                <form data-admin-form="especialidad" id="form-especialidad" class="row g-2" method="post" action="#" novalidate>
+                    <div class="col-md-4"><input class="form-control" name="nombre" placeholder="Nombre de la especialidad" minlength="3" maxlength="50" aria-label="Nombre de la especialidad" required></div>
+                    <div class="col-md-6"><input class="form-control" name="descripcion" placeholder="Descripción (opcional)" maxlength="255" aria-label="Descripción"></div>
+                    <div class="col-md-2"><button class="btn btn-clinicita w-100" type="submit"><i class="bi bi-plus-lg me-1"></i>Agregar</button></div>
                 </form>
             </div>
             <div class="panel-card">
                 <div class="table-responsive">
-                    <table class="table">
+                    <table class="table align-middle tabla-panel">
                         <thead>
-                            <tr><th>Nombre</th><th>Descripción</th><th>Médicos asociados</th><th>Acciones</th></tr>
+                            <tr><th>Nombre</th><th>Descripción</th><th class="text-center">Médicos asociados</th><th>Estado</th><th class="text-end">Acciones</th></tr>
                         </thead>
-                        <tbody id="tabla-especialidades"><!-- TODO: GET /api/especialidades --></tbody>
+                        <tbody id="tabla-especialidades"></tbody>
                     </table>
                 </div>
-                <div class="empty-state"><i class="bi bi-heart-pulse"></i>Sin especialidades registradas.</div>
+                <div class="empty-state d-none" id="vacio-especialidades"><i class="bi bi-heart-pulse"></i>Sin especialidades registradas.</div>
             </div>
         </main>
     </div>
 </div>
+<!-- NUEVO: el JS de Bootstrap (ventanas modales) va en una copia LOCAL, no desde internet:
+     server.js usa helmet, y su política de seguridad solo permite scripts del propio sitio
+     (script-src 'self'). Cargarlo desde un CDN lo bloquearía y los modales no abrirían. -->
+<script src="../../assets/js/vendor/bootstrap.bundle.min.js"></script>
+<!-- El ORDEN importa: app.js (api, logout, control de rol) -> panel-comun.js -> admin.js -->
 <script src="../../assets/js/app.js"></script>
+<script src="../../assets/js/panel-comun.js"></script>
+<script src="../../assets/js/admin.js"></script>
 </body>
 </html>
-
