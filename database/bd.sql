@@ -171,7 +171,7 @@ CREATE TABLE `lista_espera_ofertas` (
   UNIQUE KEY `uq_lista_espera_paciente_ofertado` (`espera_activa`),
   KEY `idx_lista_espera_ofertas_vencimiento` (`estado`, `vence_en`),
   KEY `idx_lista_espera_ofertas_paciente` (`paciente_id`, `estado`),
-  CONSTRAINT `fk_espera_oferta_espera` FOREIGN KEY (`espera_id`) REFERENCES `lista_espera` (`espera_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_espera_oferta_espera` FOREIGN KEY (`espera_id`) REFERENCES `lista_espera` (`espera_id`),
   CONSTRAINT `fk_espera_oferta_paciente` FOREIGN KEY (`paciente_id`) REFERENCES `pacientes` (`paciente_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_espera_oferta_medico` FOREIGN KEY (`medico_id`) REFERENCES `medicos` (`medico_id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_espera_oferta_sede` FOREIGN KEY (`sede_id`) REFERENCES `sedes` (`sede_id`) ON DELETE SET NULL,
