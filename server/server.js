@@ -342,6 +342,19 @@ app.use(express.static(path.join(__dirname, "..", "public"), (req, res, next) =>
     console.log("DEBUG: express.static middleware hit for:", req.path);
     next();
 }));
+
+// SPA fallback: sirve index.html para rutas no-API y no-estáticas (React Router)
+app.use((req, res, next) => {
+    // Saltar API, assets hasheados, y test-panel
+    if (req.path.startsWith('/api/') || 
+        req.path.startsWith('/assets/') || 
+        req.path === '/test-panel.html' ||
+        req.path.includes('.')) { // archivos con extensión (favicon, etc.)
+        return next();
+    }
+    res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+});
+
 app.use("/api", apiLimiter, (req, res, next) => {
     const fs = require('fs');
     try {
