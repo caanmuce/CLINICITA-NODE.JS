@@ -1,7 +1,10 @@
 console.log("=== SERVER.JS LOADING FROM:", __filename, "===");
 const express = require("express");
 const path = require("path");
-require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
+require("dotenv").config({
+    path: path.join(__dirname, "..", ".env"),
+    override: process.env.NODE_ENV !== "production"
+});
 const conexion = require("./conexion");
 const crypto = require("crypto");
 const { promisify } = require("util");
@@ -14,12 +17,22 @@ const helmet = require("helmet");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 const { mlClient } = require("./services/ml-client");
+// Módulos de Administración y Médico aportados por juan-nuevo.
+const { migrar } = require("./rutas/migraciones");
+const { registrarRutasAdmin } = require("./rutas/admin");
+const { calcularHorariosLibres } = require("./rutas/horarios");
+const { hoyClinica, esFechaValida } = require("./rutas/utilidades");
 
 const app = express();
 const query = promisify(conexion.query).bind(conexion);
 const ROLES = ["paciente", "medico", "recepcionista", "administrador"];
 const TOKEN_SECRET = process.env.TOKEN_SECRET || "clinicita-clave-local-cambiar-en-produccion";
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "http://localhost:8000";
+const DEVELOPER_MODE = process.env.NODE_ENV !== "production" && process.env.DEVELOPER_MODE === "true";
+
+if (DEVELOPER_MODE) {
+    console.warn("⚠️ DEVELOPER_MODE activo: los médicos podrán recibir citas a cualquier hora.");
+}
 
 // Validar TOKEN_SECRET en producción
 if (process.env.NODE_ENV === "production" && (!process.env.TOKEN_SECRET || process.env.TOKEN_SECRET === "clinicita-clave-local-cambiar-en-produccion")) {
@@ -231,6 +244,16 @@ async function initializeAuth() {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
     await query(`
+        CREATE TABLE IF NOT EXISTS whatsapp_sesiones (
+            chat_id VARCHAR(255) NOT NULL PRIMARY KEY,
+            tipo ENUM('conversacion', 'autorizacion') NOT NULL,
+            payload JSON NOT NULL,
+            expira_en DATETIME NOT NULL,
+            actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            KEY idx_whatsapp_sesiones_expira (expira_en)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    await query(`
         CREATE TABLE IF NOT EXISTS recordatorios (
             recordatorio_id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
             cita_id INT NOT NULL,
@@ -297,7 +320,7 @@ async function initializeAuth() {
             UNIQUE KEY uq_lista_espera_paciente_ofertado (espera_activa),
             KEY idx_lista_espera_ofertas_vencimiento (estado, vence_en),
             KEY idx_lista_espera_ofertas_paciente (paciente_id, estado),
-            CONSTRAINT fk_espera_oferta_espera FOREIGN KEY (espera_id) REFERENCES lista_espera(espera_id) ON DELETE CASCADE,
+            CONSTRAINT fk_espera_oferta_espera FOREIGN KEY (espera_id) REFERENCES lista_espera(espera_id),
             CONSTRAINT fk_espera_oferta_paciente FOREIGN KEY (paciente_id) REFERENCES pacientes(paciente_id) ON DELETE CASCADE,
             CONSTRAINT fk_espera_oferta_medico FOREIGN KEY (medico_id) REFERENCES medicos(medico_id) ON DELETE RESTRICT,
             CONSTRAINT fk_espera_oferta_sede FOREIGN KEY (sede_id) REFERENCES sedes(sede_id) ON DELETE SET NULL,
@@ -460,6 +483,9 @@ app.use("/api", apiLimiter, (req, res, next) => {
     next();
 });
 
+// Registro de rutas administrativas aisladas.
+registrarRutasAdmin(app, { query, requireAuth, requireRole, hashPassword });
+
 // Aplicar rate limiting estricto a endpoints de autenticación
 app.post("/api/auth/login", authLimiter);
 app.post("/api/auth/registro", authLimiter);
@@ -550,16 +576,18 @@ app.get("/api/horarios", requireAuth, requireRole("paciente", "recepcionista", "
     }
 
     try {
-        const franjas = await query(
-            `SELECT TIME_FORMAT(hora_inicio, '%H:%i') AS inicio,
-                    TIME_FORMAT(hora_fin, '%H:%i') AS fin,
-                    duracion_slot
-             FROM horarios
-             WHERE medico_id = ? AND activo = 1 AND dia_semana = DAYOFWEEK(?) - 1
-               AND (? IS NULL OR sede_id = ?)
-             ORDER BY hora_inicio`,
-            [medico, fecha, sede ? Number(sede) : null, sede ? Number(sede) : null]
-        );
+        const franjas = DEVELOPER_MODE
+            ? [{ inicio: "00:00", fin: "24:00", duracion_slot: 1 }]
+            : await query(
+                `SELECT TIME_FORMAT(hora_inicio, '%H:%i') AS inicio,
+                        TIME_FORMAT(hora_fin, '%H:%i') AS fin,
+                        duracion_slot
+                 FROM horarios
+                 WHERE medico_id = ? AND activo = 1 AND dia_semana = DAYOFWEEK(?) - 1
+                   AND (? IS NULL OR sede_id = ?)
+                 ORDER BY hora_inicio`,
+                [medico, fecha, sede ? Number(sede) : null, sede ? Number(sede) : null]
+            );
         const ocupadas = await query(
             `SELECT TIME_FORMAT(hora_cita, '%H:%i') AS hora
              FROM citas
@@ -599,6 +627,8 @@ app.get("/api/horarios", requireAuth, requireRole("paciente", "recepcionista", "
 // Devuelve la franja de atención (con su sede) que cubre esa hora, o null si el médico no atiende.
 // Es la misma regla que ya usa POST /api/citas/admin: dentro de una franja activa y alineada al slot.
 async function franjaDelMedico(medicoId, fecha, hora, sedeId = null) {
+    if (DEVELOPER_MODE) return { sede_id: null };
+
     const horaSQL = `${hora}:00`;
     const franjas = await query(
         `SELECT sede_id FROM horarios
@@ -1849,9 +1879,9 @@ app.post("/api/lista-espera/ofertas/:id/cancelar", requireAuth, requireRole("rec
 // -------------------- MÉDICO: AGENDA --------------------
 app.get("/api/citas/medico", requireAuth, requireRole("medico"), async (req, res) => {
     try {
-        const { fecha } = req.query;
-        if (!fecha || Number.isNaN(Date.parse(fecha))) {
-            return res.status(400).json({ mensaje: "Fecha es obligatoria" });
+        const fecha = req.query.fecha || hoyClinica();
+        if (!esFechaValida(fecha)) {
+            return res.status(400).json({ mensaje: "La fecha no es válida (use AAAA-MM-DD)" });
         }
  
         // Obtener medico_id del usuario logueado
@@ -1898,15 +1928,40 @@ app.put("/api/citas/:id/estado", requireAuth, requireRole("medico", "recepcionis
     try {
         const { id } = req.params;
         const { estado } = req.validated;
+        if (!/^\d+$/.test(id)) return res.status(400).json({ mensaje: "Identificador de cita no válido" });
 
         // Verificar permisos: médico solo puede modificar sus citas
         if (req.user.rol === "medico") {
+            if (!["Completada", "No-Asistio"].includes(estado)) {
+                return res.status(400).json({ mensaje: "El médico solo puede marcar Completada o No-Asistio" });
+            }
             const users = await query("SELECT medico_id FROM usuarios WHERE usuario_id = ? AND rol = 'medico' AND activo = 1", [req.user.id]);
             const medicoId = users[0]?.medico_id;
             if (!medicoId) return res.status(400).json({ mensaje: "Usuario no asociado a médico" });
 
-            const cita = await query("SELECT cita_id FROM citas WHERE cita_id = ? AND medico_id = ?", [id, medicoId]);
-            if (!cita.length) return res.status(404).json({ mensaje: "Cita no encontrada o no pertenece a este médico" });
+            const citas = await query(
+                "SELECT estado, DATE_FORMAT(fecha_cita, '%Y-%m-%d') AS fecha FROM citas WHERE cita_id = ? AND medico_id = ?",
+                [id, medicoId]
+            );
+            if (!citas.length) return res.status(404).json({ mensaje: "Cita no encontrada o no pertenece a este médico" });
+
+            const cita = citas[0];
+            if (cita.estado === "Cancelada") return res.status(409).json({ mensaje: "No se puede modificar una cita cancelada" });
+            if (cita.estado === estado) return res.status(409).json({ mensaje: `La cita ya está marcada como ${estado}` });
+            if (cita.fecha > hoyClinica()) return res.status(409).json({ mensaje: "No puedes registrar la asistencia de una cita futura" });
+
+            const actualizacion = await query(
+                `UPDATE citas SET estado = ?
+                 WHERE cita_id = ? AND medico_id = ? AND estado IN ('Pendiente', 'Confirmada', 'Completada', 'No-Asistio')`,
+                [estado, id, medicoId]
+            );
+            if (actualizacion.affectedRows === 0) {
+                return res.status(409).json({ mensaje: "La cita cambió mientras la editabas. Recarga la agenda." });
+            }
+            return res.json({
+                mensaje: estado === "Completada" ? "Cita marcada como atendida" : "Cita marcada como inasistencia",
+                estado
+            });
         }
 
         const estadosValidos = ["Confirmada", "Completada", "No-Asistio"];
@@ -1999,6 +2054,7 @@ app.get("/api/test", (req, res) => {
 console.log("DEBUG: Test route registered");
 
 initializeAuth()
+    .then(() => migrar({ query }))
     .then(() => app.listen(3000, async () => {
         console.log("Servidor iniciado en http://localhost:3000");
         console.log(`WhatsApp: ${process.env.ENABLE_WHATSAPP === "true" ? "activado" : "desactivado"}`);
@@ -2072,18 +2128,20 @@ app.post("/api/citas/admin", requireAuth, requireRole("recepcionista", "administ
         const medicos = await query("SELECT medico_id FROM medicos WHERE medico_id = ? AND activo = 1", [medico_id]);
         if (!medicos.length) return res.status(404).json({ mensaje: "El médico seleccionado no existe o está inactivo" });
 
-        // La hora debe caer dentro de una franja activa del médico y alinearse con duracion_slot
-        // (con slots de 30 min: 08:00 y 08:30 son válidas, 08:10 no). dia_semana: 0 = domingo.
-        const franjas = await query(
-            `SELECT sede_id FROM horarios
-             WHERE medico_id = ? AND activo = 1
-               AND dia_semana = DAYOFWEEK(?) - 1
-               AND ? >= hora_inicio AND ? < hora_fin
-               AND MOD(TIME_TO_SEC(TIMEDIFF(?, hora_inicio)), duracion_slot * 60) = 0
-               AND (? IS NULL OR sede_id = ?)
-             LIMIT 1`,
-            [medico_id, fecha, horaSQL, horaSQL, horaSQL, sede_id ?? null, sede_id ?? null]
-        );
+        // Fuera de desarrollo, la hora debe caer dentro de una franja activa
+        // y alinearse con la duración configurada del slot. dia_semana: 0 = domingo.
+        const franjas = DEVELOPER_MODE
+            ? [{ sede_id: null }]
+            : await query(
+                `SELECT sede_id FROM horarios
+                 WHERE medico_id = ? AND activo = 1
+                   AND dia_semana = DAYOFWEEK(?) - 1
+                   AND ? >= hora_inicio AND ? < hora_fin
+                   AND MOD(TIME_TO_SEC(TIMEDIFF(?, hora_inicio)), duracion_slot * 60) = 0
+                   AND (? IS NULL OR sede_id = ?)
+                 LIMIT 1`,
+                [medico_id, fecha, horaSQL, horaSQL, horaSQL, sede_id ?? null, sede_id ?? null]
+            );
         if (!franjas.length) {
             return res.status(400).json({ mensaje: "El médico no atiende en ese día u hora" });
         }

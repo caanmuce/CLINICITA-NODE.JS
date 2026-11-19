@@ -2,6 +2,8 @@ node_modules/
 .env
 .wwebjs_auth/
 .wwebjs_cache/
+private-models/
+backups/
 
 # Python
 .venv/
@@ -12,3 +14,4 @@ __pycache__/
 # Logs and generated local files
 *.log
 docker-compose
+.github

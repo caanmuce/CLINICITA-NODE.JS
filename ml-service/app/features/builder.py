@@ -8,8 +8,34 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def normalize_hora(value) -> str:
+    if isinstance(value, timedelta):
+        total_seconds = int(value.total_seconds())
+        hour, remainder = divmod(total_seconds, 3600)
+        minute, second = divmod(remainder, 60)
+        return f"{hour:02d}:{minute:02d}:{second:02d}"
+    if hasattr(value, 'hour'):
+        return f"{value.hour:02d}:{value.minute:02d}:{value.second:02d}"
+    text = str(value).strip()
+    parts = text.split(':')
+    if len(parts) >= 3:
+        try:
+            return f"{int(parts[0]):02d}:{int(parts[1]):02d}:{int(float(parts[2])):02d}"
+        except (TypeError, ValueError):
+            pass
+    return '10:00:00'
+
+
 class FeatureBuilder:
     """Construye features de riesgo no-show por paciente"""
+
+    DEFAULT_APPOINTMENT_FEATURES = {
+        'antelacion_dias': 7.0,
+        'hora_cita_num': 10.0,
+        'dia_semana': 2,
+        'especialidad': 'Desconocida',
+        'medico_id': -1,
+    }
 
     def __init__(self, db_pool):
         self.db_pool = db_pool
@@ -53,8 +79,8 @@ class FeatureBuilder:
         """
 
         try:
-            import pymysql
-            with self.db_pool.get_conn() as conn:
+            from ..database import get_connection
+            with get_connection() as conn:
                 with conn.cursor() as cursor:
                     cursor.execute(query, params)
                     rows = cursor.fetchall()
@@ -78,9 +104,163 @@ class FeatureBuilder:
 
         return result_df
 
+    def build_training_dataset(self) -> pd.DataFrame:
+        """Construye ejemplos por cita usando únicamente historial previo."""
+        query = """
+        SELECT
+            c.paciente_id,
+            c.cita_id,
+            c.fecha_cita,
+            c.hora_cita,
+            c.estado,
+            c.fecha_creacion,
+            c.medico_id,
+            c.sede_id,
+            m.especialidad,
+            p.fecha_nacimiento,
+            p.genero,
+            p.whatsapp_lid,
+            COALESCE(r.wa_enviados, 0) AS wa_enviados,
+            COALESCE(r.wa_confirmados, 0) AS wa_confirmados
+        FROM citas c
+        JOIN pacientes p ON p.paciente_id = c.paciente_id
+        JOIN medicos m ON m.medico_id = c.medico_id
+        LEFT JOIN (
+            SELECT
+                cita_id,
+                SUM(CASE WHEN canal_envio LIKE 'WhatsApp%' THEN 1 ELSE 0 END) AS wa_enviados,
+                SUM(CASE WHEN canal_envio LIKE 'WhatsApp%' AND respuesta_paciente = 1 THEN 1 ELSE 0 END) AS wa_confirmados
+            FROM recordatorios
+            GROUP BY cita_id
+        ) r ON r.cita_id = c.cita_id
+        ORDER BY c.paciente_id, c.fecha_cita, c.hora_cita, c.cita_id
+        """
+
+        try:
+            from ..database import get_connection
+            with get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(query)
+                    rows = cursor.fetchall()
+        except Exception as e:
+            logger.error(f"Error ejecutando query del dataset de entrenamiento: {e}")
+            return pd.DataFrame()
+
+        data = pd.DataFrame(rows)
+        if data.empty:
+            return data
+
+        data['fecha_cita'] = pd.to_datetime(data['fecha_cita'], errors='coerce')
+        data['fecha_creacion'] = pd.to_datetime(data['fecha_creacion'], errors='coerce')
+
+        hora_normalizada = data['hora_cita'].map(normalize_hora)
+        data['_cita_datetime'] = pd.to_datetime(
+            data['fecha_cita'].dt.strftime('%Y-%m-%d') + ' ' +
+            hora_normalizada,
+            format='%Y-%m-%d %H:%M:%S',
+            errors='coerce'
+        )
+        data['antelacion_dias'] = (data['fecha_cita'] - data['fecha_creacion']).dt.days
+
+        training_rows = []
+        for pid, group in data.groupby('paciente_id', sort=False):
+            group = group.sort_values(['_cita_datetime', 'cita_id'])
+            for _, target in group.iterrows():
+                if target['estado'] not in ('Completada', 'No-Asistio'):
+                    continue
+                prior = group[group['_cita_datetime'] < target['_cita_datetime']]
+                training_rows.append(self._compute_training_row(target, prior, pid))
+
+        result = pd.DataFrame(training_rows)
+        if not result.empty:
+            result['_cita_datetime'] = pd.to_datetime(result['_cita_datetime'], errors='coerce')
+            result = result.sort_values(['_cita_datetime', 'paciente_id'], kind='stable').reset_index(drop=True)
+        logger.info(f"Dataset de entrenamiento sin fuga: {len(result)} citas")
+        return result
+
+    def _compute_training_row(self, target: pd.Series, prior: pd.DataFrame, pid: int) -> Dict:
+        """Calcula features de una cita objetivo sin leer sus datos de resultado."""
+        total = len(prior)
+        completadas = int((prior['estado'] == 'Completada').sum())
+        no_show = int((prior['estado'] == 'No-Asistio').sum())
+        canceladas = int((prior['estado'] == 'Cancelada').sum())
+        prior_dates = prior['_cita_datetime'].dropna()
+        target_dt = target['_cita_datetime']
+
+        antelacion = (target['fecha_cita'] - target['fecha_creacion']).days
+        hora = pd.to_datetime(str(target['hora_cita'])[:8], format='%H:%M:%S', errors='coerce')
+        hora_num = int(hora.hour) if pd.notna(hora) else 10
+        dia_semana = int(target['fecha_cita'].dayofweek) if pd.notna(target['fecha_cita']) else 2
+        edad = -1
+        nacimiento = pd.to_datetime(target.get('fecha_nacimiento'), errors='coerce')
+        if pd.notna(nacimiento) and pd.notna(target_dt):
+            edad = (target_dt - nacimiento).days / 365.25
+
+        recientes = prior[prior['_cita_datetime'] >= target_dt - timedelta(days=90)]
+        wa_enviados = prior['wa_enviados'].sum() if total else 0
+        wa_confirmados = prior['wa_confirmados'].sum() if total else 0
+        medico_frecuente = prior['medico_id'].mode().iloc[0] if not prior.empty and not prior['medico_id'].mode().empty else None
+        especialidad_frecuente = prior['especialidad'].mode().iloc[0] if not prior.empty and not prior['especialidad'].mode().empty else None
+
+        racha = 0
+        for estado in reversed(prior['estado'].tolist()):
+            if estado == 'No-Asistio':
+                racha += 1
+            else:
+                break
+
+        return {
+            'paciente_id': pid,
+            'target': int(target['estado'] == 'No-Asistio'),
+            '_cita_datetime': target_dt,
+            'total_citas': total,
+            'citas_completadas': completadas,
+            'citas_no_show': no_show,
+            'citas_canceladas': canceladas,
+            'citas_confirmadas': int((prior['estado'] == 'Confirmada').sum()),
+            'citas_pendientes': int((prior['estado'] == 'Pendiente').sum()),
+            'tasa_no_show': no_show / total if total else 0,
+            'tasa_cancelacion': canceladas / total if total else 0,
+            'tasa_completada': completadas / total if total else 0,
+            'citas_ultimos_90d': len(recientes),
+            'no_show_ultimos_90d': int((recientes['estado'] == 'No-Asistio').sum()),
+            'tasa_no_show_reciente': (
+                int((recientes['estado'] == 'No-Asistio').sum()) / len(recientes)
+                if len(recientes) else 0
+            ),
+            'antelacion_promedio': prior['antelacion_dias'].mean() if 'antelacion_dias' in prior and total else -1,
+            'antelacion_mediana': prior['antelacion_dias'].median() if 'antelacion_dias' in prior and total else -1,
+            'antelacion_std': prior['antelacion_dias'].std() if 'antelacion_dias' in prior and total > 1 else -1,
+            'pct_manana': (
+                (pd.to_datetime(prior['hora_cita'].astype(str).str.slice(0, 8), format='%H:%M:%S', errors='coerce').dt.hour < 12).mean()
+                if total else 0.5
+            ),
+            'hora_promedio': (
+                pd.to_datetime(prior['hora_cita'].astype(str).str.slice(0, 8), format='%H:%M:%S', errors='coerce').dt.hour.mean()
+                if total else 12
+            ),
+            'dia_semana_moda': int(prior['fecha_cita'].dt.dayofweek.mode().iloc[0]) if total else -1,
+            'tiene_lid': int(pd.notna(target.get('whatsapp_lid')) and target.get('whatsapp_lid') != ''),
+            'wa_tasa_confirmacion': wa_confirmados / wa_enviados if wa_enviados else 0,
+            'wa_tiempo_respuesta_promedio': -1,
+            'edad': edad,
+            'genero': target.get('genero') if pd.notna(target.get('genero')) else 'Otro',
+            'medico_habitual': float(prior['medico_id'].eq(medico_frecuente).mean()) if medico_frecuente is not None else 0,
+            'especialidad_habitual': float(prior['especialidad'].eq(especialidad_frecuente).mean()) if especialidad_frecuente else 0,
+            'racha_no_show_actual': racha,
+            'dias_desde_ultima_cita': (target_dt - prior_dates.max()).days if len(prior_dates) else -1,
+            'citas_proximas_30d': 0,
+            'antelacion_dias': float(antelacion) if pd.notna(antelacion) else 7.0,
+            'hora_cita_num': hora_num,
+            'dia_semana': dia_semana,
+            'especialidad': target.get('especialidad') or 'Desconocida',
+            'medico_id': int(target['medico_id']) if pd.notna(target.get('medico_id')) else -1,
+        }
+
     def _compute_patient_features(self, pid: int, df: pd.DataFrame) -> Dict:
         """Calcula features para un paciente individual"""
         now = self.reference_date
+        df = df.copy()
 
         # Básicas
         total_citas = len(df)
@@ -96,18 +276,39 @@ class FeatureBuilder:
         df['antelacion_dias'] = (df['fecha_cita'] - df['fecha_creacion']).dt.days
 
         # Hora de la cita (0-23)
-        df['hora_cita_num'] = pd.to_datetime(df['hora_cita'], format='%H:%M:%S', errors='coerce').dt.hour
+        df['hora_cita_num'] = pd.to_datetime(
+            df['hora_cita'].astype(str).str.slice(0, 8),
+            format='%H:%M:%S',
+            errors='coerce'
+        ).dt.hour
         df['es_manana'] = df['hora_cita_num'] < 12
 
         # Día de semana (0=Lunes)
         df['dia_semana'] = df['fecha_cita'].dt.dayofweek
 
-        # Ventana reciente (últimos 90 días)
+        # Contexto de inferencia: usar la próxima cita agendada, nunca valores
+        # estáticos cuando existe una cita pendiente o confirmada.
+        appointment_context = self._next_appointment_features(df, now)
+
+        # Historial disponible en el punto de corte: excluye citas futuras.
+        df['appointment_datetime'] = pd.to_datetime(
+            df['fecha_cita'].dt.strftime('%Y-%m-%d') + ' ' +
+            df['hora_cita'].map(normalize_hora),
+            format='%Y-%m-%d %H:%M:%S',
+            errors='coerce',
+        )
+        cut_timestamp = pd.Timestamp(now)
+        df_history = df[df['appointment_datetime'] < cut_timestamp].copy()
+
+        # Ventana reciente (últimos 90 días), acotada al pasado estricto.
         cutoff_90 = now - timedelta(days=90)
-        recent = df[df['fecha_cita'] >= cutoff_90]
+        recent = df_history[
+            (df_history['appointment_datetime'] >= pd.Timestamp(cutoff_90))
+            & (df_history['appointment_datetime'] < cut_timestamp)
+        ]
 
         # Features de WhatsApp
-        wa_msgs = df.dropna(subset=['canal_envio'])
+        wa_msgs = df_history.dropna(subset=['canal_envio'])
         wa_confirmados = len(wa_msgs[(wa_msgs['canal_envio'] == 'WhatsApp') & (wa_msgs['respuesta_paciente'] == 1)])
         wa_enviados = len(wa_msgs[wa_msgs['canal_envio'] == 'WhatsApp'])
         wa_tasa_confirmacion = wa_confirmados / wa_enviados if wa_enviados > 0 else 0
@@ -116,64 +317,104 @@ class FeatureBuilder:
         tiempo_resp_promedio = -1
 
         # Médico/especialidad habitual
-        medico_frecuente = df['medico_id'].mode().iloc[0] if not df['medico_id'].mode().empty else None
-        especialidad_frecuente = df['especialidad'].mode().iloc[0] if not df['especialidad'].mode().empty else None
+        medico_frecuente = df_history['medico_id'].mode().iloc[0] if not df_history['medico_id'].mode().empty else None
+        especialidad_frecuente = df_history['especialidad'].mode().iloc[0] if not df_history['especialidad'].mode().empty else None
 
         # Edad
         edad = -1
-        if pd.notna(df['fecha_nacimiento'].iloc[0]):
-            nacimiento = pd.to_datetime(df['fecha_nacimiento'].iloc[0], errors='coerce')
+        if not df_history.empty and pd.notna(df_history['fecha_nacimiento'].iloc[0]):
+            nacimiento = pd.to_datetime(df_history['fecha_nacimiento'].iloc[0], errors='coerce')
             if pd.notna(nacimiento):
                 edad = (now - nacimiento).days / 365.25
 
         # Tiene LID vinculado
-        tiene_lid = pd.notna(df['whatsapp_lid'].iloc[0]) and df['whatsapp_lid'].iloc[0] != ''
+        tiene_lid = (
+            not df_history.empty
+            and pd.notna(df_history['whatsapp_lid'].iloc[0])
+            and df_history['whatsapp_lid'].iloc[0] != ''
+        )
 
         # Features compuestas
         features = {
             'paciente_id': pid,
             # Volumen
-            'total_citas': total_citas,
-            'citas_completadas': citas_completadas,
-            'citas_no_show': citas_no_show,
-            'citas_canceladas': citas_canceladas,
-            'citas_confirmadas': citas_confirmadas,
-            'citas_pendientes': citas_pendientes,
+            'total_citas': len(df_history),
+            'citas_completadas': len(df_history[df_history['estado'] == 'Completada']),
+            'citas_no_show': len(df_history[df_history['estado'] == 'No-Asistio']),
+            'citas_canceladas': len(df_history[df_history['estado'] == 'Cancelada']),
+            'citas_confirmadas': len(df_history[df_history['estado'] == 'Confirmada']),
+            'citas_pendientes': len(df_history[df_history['estado'] == 'Pendiente']),
             # Tasas históricas
-            'tasa_no_show': citas_no_show / total_citas if total_citas > 0 else 0,
-            'tasa_cancelacion': citas_canceladas / total_citas if total_citas > 0 else 0,
-            'tasa_completada': citas_completadas / total_citas if total_citas > 0 else 0,
+            'tasa_no_show': len(df_history[df_history['estado'] == 'No-Asistio']) / len(df_history) if len(df_history) > 0 else 0,
+            'tasa_cancelacion': len(df_history[df_history['estado'] == 'Cancelada']) / len(df_history) if len(df_history) > 0 else 0,
+            'tasa_completada': len(df_history[df_history['estado'] == 'Completada']) / len(df_history) if len(df_history) > 0 else 0,
             # Recientes (90 días)
             'citas_ultimos_90d': len(recent),
             'no_show_ultimos_90d': len(recent[recent['estado'] == 'No-Asistio']),
             'tasa_no_show_reciente': len(recent[recent['estado'] == 'No-Asistio']) / len(recent) if len(recent) > 0 else 0,
             # Antelación
-            'antelacion_promedio': df['antelacion_dias'].mean() if not df['antelacion_dias'].isna().all() else -1,
-            'antelacion_mediana': df['antelacion_dias'].median() if not df['antelacion_dias'].isna().all() else -1,
-            'antelacion_std': df['antelacion_dias'].std() if not df['antelacion_dias'].isna().all() else -1,
+            'antelacion_promedio': df_history['antelacion_dias'].mean() if not df_history.empty else -1,
+            'antelacion_mediana': df_history['antelacion_dias'].median() if not df_history.empty else -1,
+            'antelacion_std': df_history['antelacion_dias'].std() if len(df_history) > 1 else -1,
             # Preferencias horarias
-            'pct_manana': df['es_manana'].mean() if not df['es_manana'].isna().all() else 0.5,
-            'hora_promedio': df['hora_cita_num'].mean() if not df['hora_cita_num'].isna().all() else 12,
+            'pct_manana': df_history['es_manana'].mean() if not df_history.empty else 0.5,
+            'hora_promedio': df_history['hora_cita_num'].mean() if not df_history.empty else 12,
             # Día semana preferido
-            'dia_semana_moda': int(df['dia_semana'].mode().iloc[0]) if not df['dia_semana'].mode().empty else -1,
+            'dia_semana_moda': int(df_history['dia_semana'].mode().iloc[0]) if not df_history.empty and not df_history['dia_semana'].mode().empty else -1,
             # WhatsApp
             'tiene_lid': int(tiene_lid),
             'wa_tasa_confirmacion': wa_tasa_confirmacion,
             'wa_tiempo_respuesta_promedio': tiempo_resp_promedio,
             # Demográficos
             'edad': edad,
-            'genero': df['genero'].iloc[0] if pd.notna(df['genero'].iloc[0]) else 'Otro',
+            'genero': df_history['genero'].iloc[0] if not df_history.empty and pd.notna(df_history['genero'].iloc[0]) else 'Otro',
             # Consistencia
-            'medico_habitual': float(df['medico_id'].eq(medico_frecuente).mean()) if medico_frecuente else 0,
-            'especialidad_habitual': float(df['especialidad'].eq(especialidad_frecuente).mean()) if especialidad_frecuente else 0,
+            'medico_habitual': float(df_history['medico_id'].eq(medico_frecuente).mean()) if medico_frecuente is not None and not df_history.empty else 0,
+            'especialidad_habitual': float(df_history['especialidad'].eq(especialidad_frecuente).mean()) if especialidad_frecuente and not df_history.empty else 0,
             # Rachas
-            'racha_no_show_actual': self._calcular_racha_no_show(df),
-            'dias_desde_ultima_cita': (now - df['fecha_cita'].max()).days if total_citas > 0 and pd.notna(df['fecha_cita'].max()) else -1,
+            'racha_no_show_actual': self._calcular_racha_no_show(df_history),
+            'dias_desde_ultima_cita': (now - df_history['fecha_cita'].max()).days if not df_history.empty and pd.notna(df_history['fecha_cita'].max()) else -1,
             # Próximas citas
-            'citas_proximas_30d': len(df[(df['fecha_cita'] >= now) & (df['fecha_cita'] <= now + timedelta(days=30))])
+            'citas_proximas_30d': len(df[(df['fecha_cita'] >= now) & (df['fecha_cita'] <= now + timedelta(days=30))]),
+            # Features usadas por el modelo a nivel de cita
+            **appointment_context,
         }
 
         return features
+
+    def _next_appointment_features(self, df: pd.DataFrame, now: datetime) -> Dict:
+        """Obtiene el contexto de la próxima cita activa o aplica defaults."""
+        defaults = self.DEFAULT_APPOINTMENT_FEATURES.copy()
+        if df.empty:
+            return defaults
+
+        appointment_datetime = pd.to_datetime(
+            df['fecha_cita'].dt.strftime('%Y-%m-%d') + ' ' +
+            df['hora_cita'].map(normalize_hora),
+            errors='coerce'
+        )
+        active = df.assign(_appointment_datetime=appointment_datetime)
+        active = active[
+            active['_appointment_datetime'].notna()
+            & (active['_appointment_datetime'] >= pd.Timestamp(now))
+            & active['estado'].isin(['Pendiente', 'Confirmada'])
+        ].sort_values('_appointment_datetime')
+
+        if active.empty:
+            return defaults
+
+        next_appointment = active.iloc[0]
+        antelacion = next_appointment.get('antelacion_dias')
+        hora = next_appointment.get('hora_cita_num')
+        dia = next_appointment.get('dia_semana')
+        medico_id = next_appointment.get('medico_id')
+        return {
+            'antelacion_dias': float(antelacion) if pd.notna(antelacion) else defaults['antelacion_dias'],
+            'hora_cita_num': float(hora) if pd.notna(hora) else defaults['hora_cita_num'],
+            'dia_semana': int(dia) if pd.notna(dia) else defaults['dia_semana'],
+            'especialidad': next_appointment.get('especialidad') or defaults['especialidad'],
+            'medico_id': int(medico_id) if pd.notna(medico_id) else defaults['medico_id'],
+        }
 
     def _calcular_racha_no_show(self, df: pd.DataFrame) -> int:
         """Cuenta No-Asistio consecutivos al final del historial"""
