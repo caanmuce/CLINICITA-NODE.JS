@@ -17,6 +17,11 @@ const helmet = require("helmet");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 const { mlClient } = require("./services/ml-client");
+// Módulos de Administración y Médico aportados por juan-nuevo.
+const { migrar } = require("./rutas/migraciones");
+const { registrarRutasAdmin } = require("./rutas/admin");
+const { calcularHorariosLibres } = require("./rutas/horarios");
+const { hoyClinica, esFechaValida } = require("./rutas/utilidades");
 
 const app = express();
 const query = promisify(conexion.query).bind(conexion);
@@ -477,6 +482,9 @@ app.use("/api", apiLimiter, (req, res, next) => {
     res.set("Cache-Control", "no-store");
     next();
 });
+
+// Registro de rutas administrativas aisladas.
+registrarRutasAdmin(app, { query, requireAuth, requireRole, hashPassword });
 
 // Aplicar rate limiting estricto a endpoints de autenticación
 app.post("/api/auth/login", authLimiter);
@@ -1871,9 +1879,9 @@ app.post("/api/lista-espera/ofertas/:id/cancelar", requireAuth, requireRole("rec
 // -------------------- MÉDICO: AGENDA --------------------
 app.get("/api/citas/medico", requireAuth, requireRole("medico"), async (req, res) => {
     try {
-        const { fecha } = req.query;
-        if (!fecha || Number.isNaN(Date.parse(fecha))) {
-            return res.status(400).json({ mensaje: "Fecha es obligatoria" });
+        const fecha = req.query.fecha || hoyClinica();
+        if (!esFechaValida(fecha)) {
+            return res.status(400).json({ mensaje: "La fecha no es válida (use AAAA-MM-DD)" });
         }
  
         // Obtener medico_id del usuario logueado
@@ -1920,15 +1928,40 @@ app.put("/api/citas/:id/estado", requireAuth, requireRole("medico", "recepcionis
     try {
         const { id } = req.params;
         const { estado } = req.validated;
+        if (!/^\d+$/.test(id)) return res.status(400).json({ mensaje: "Identificador de cita no válido" });
 
         // Verificar permisos: médico solo puede modificar sus citas
         if (req.user.rol === "medico") {
+            if (!["Completada", "No-Asistio"].includes(estado)) {
+                return res.status(400).json({ mensaje: "El médico solo puede marcar Completada o No-Asistio" });
+            }
             const users = await query("SELECT medico_id FROM usuarios WHERE usuario_id = ? AND rol = 'medico' AND activo = 1", [req.user.id]);
             const medicoId = users[0]?.medico_id;
             if (!medicoId) return res.status(400).json({ mensaje: "Usuario no asociado a médico" });
 
-            const cita = await query("SELECT cita_id FROM citas WHERE cita_id = ? AND medico_id = ?", [id, medicoId]);
-            if (!cita.length) return res.status(404).json({ mensaje: "Cita no encontrada o no pertenece a este médico" });
+            const citas = await query(
+                "SELECT estado, DATE_FORMAT(fecha_cita, '%Y-%m-%d') AS fecha FROM citas WHERE cita_id = ? AND medico_id = ?",
+                [id, medicoId]
+            );
+            if (!citas.length) return res.status(404).json({ mensaje: "Cita no encontrada o no pertenece a este médico" });
+
+            const cita = citas[0];
+            if (cita.estado === "Cancelada") return res.status(409).json({ mensaje: "No se puede modificar una cita cancelada" });
+            if (cita.estado === estado) return res.status(409).json({ mensaje: `La cita ya está marcada como ${estado}` });
+            if (cita.fecha > hoyClinica()) return res.status(409).json({ mensaje: "No puedes registrar la asistencia de una cita futura" });
+
+            const actualizacion = await query(
+                `UPDATE citas SET estado = ?
+                 WHERE cita_id = ? AND medico_id = ? AND estado IN ('Pendiente', 'Confirmada', 'Completada', 'No-Asistio')`,
+                [estado, id, medicoId]
+            );
+            if (actualizacion.affectedRows === 0) {
+                return res.status(409).json({ mensaje: "La cita cambió mientras la editabas. Recarga la agenda." });
+            }
+            return res.json({
+                mensaje: estado === "Completada" ? "Cita marcada como atendida" : "Cita marcada como inasistencia",
+                estado
+            });
         }
 
         const estadosValidos = ["Confirmada", "Completada", "No-Asistio"];
@@ -2021,6 +2054,7 @@ app.get("/api/test", (req, res) => {
 console.log("DEBUG: Test route registered");
 
 initializeAuth()
+    .then(() => migrar({ query }))
     .then(() => app.listen(3000, async () => {
         console.log("Servidor iniciado en http://localhost:3000");
         console.log(`WhatsApp: ${process.env.ENABLE_WHATSAPP === "true" ? "activado" : "desactivado"}`);
