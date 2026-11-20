@@ -56,7 +56,7 @@ export const MedicoAgenda = () => {
         <div className="p-4 text-center text-gray-500 border-t border-gray-200">
           <Calendar className="h-10 w-10 mx-auto text-gray-300 mb-2" />
           <p>Haz clic en un espacio para agregar disponibilidad</p>
-          <button className="mt-2 inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors">
+          <button className="mt-2 inline-flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 transition-colors">
             <PlusCircle className="h-5 w-5" />
             Agregar horario
           </button>
@@ -66,7 +66,7 @@ export const MedicoAgenda = () => {
       {/* Notice */}
       <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
         <h3 className="font-medium text-yellow-900 mb-2 flex items-center gap-2"><span>⚠</span> Página en desarrollo</h3>
-        <p className="text-sm text-yellow-700">Funcionalidades pendientes:
+        <div className="text-sm text-yellow-700">Funcionalidades pendientes:
           <ul className="list-disc list-inside mt-2 space-y-1 text-xs">
             <li>GET /api/horarios/medico/:id - Obtener horarios semanales</li>
             <li>POST /api/horarios - Crear bloque de disponibilidad (dia_semana, hora_inicio, hora_fin, sede_id)</li>
@@ -76,7 +76,7 @@ export const MedicoAgenda = () => {
             <li>Excepciones: feriados, vacaciones (POST /api/horarios/excepciones)</li>
             <li>Vista mensual y sincronización con citas agendadas</li>
           </ul>
-        </p>
+        </div>
       </div>
     </div>
   );
