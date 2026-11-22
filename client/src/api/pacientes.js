@@ -1,15 +1,18 @@
-import apiClient from './apiClient';
+import apiClient from "./apiClient";
 
 export const pacientesApi = {
   // GET /api/pacientes (Buscar pacientes - Recep/Admin)
+  // Backend devuelve: { pacientes: [...] }
   buscar: async (q, limit = 10) => {
-    const response = await apiClient.get('/pacientes', { params: { q, limit } });
-    return response.data;
+    const response = await apiClient.get("/pacientes", {
+      params: { q, limit },
+    });
+    return response.data.pacientes || [];
   },
 
   // GET /api/pacientes/me/riesgo (Paciente ve su riesgo no-show)
   verMiRiesgo: async () => {
-    const response = await apiClient.get('/pacientes/me/riesgo');
+    const response = await apiClient.get("/pacientes/me/riesgo");
     return response.data;
   },
 
@@ -21,13 +24,15 @@ export const pacientesApi = {
 
   // POST /api/pacientes/riesgo/batch (Batch risk para dashboard recepción)
   verRiesgoBatch: async (paciente_ids) => {
-    const response = await apiClient.post('/pacientes/riesgo/batch', { paciente_ids });
+    const response = await apiClient.post("/pacientes/riesgo/batch", {
+      paciente_ids,
+    });
     return response.data;
   },
 
   // POST /api/pacientes/riesgo/recalcular-todos (Admin recalcula todos)
   recalcularTodos: async () => {
-    const response = await apiClient.post('/pacientes/riesgo/recalcular-todos');
+    const response = await apiClient.post("/pacientes/riesgo/recalcular-todos");
     return response.data;
   },
 };

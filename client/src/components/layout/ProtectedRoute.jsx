@@ -1,12 +1,12 @@
 // src/components/layout/ProtectedRoute.jsx
 
-import React from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
+import React from "react";
+import { Navigate, useLocation } from "react-router-dom";
+import { useAuth } from "../../context/AuthContext";
 
 /**
  * ProtectedRoute - Wrapper que protege rutas por autenticación y rol
- * 
+ *
  * @param {string[]} allowedRoles - Array de roles permitidos (ej: ['paciente', 'medico'])
  * @param {React.ReactNode} children - Contenido a renderizar si tiene acceso
  * @returns {React.ReactElement} - Componente o redirección
@@ -19,7 +19,7 @@ export const ProtectedRoute = ({ allowedRoles = [], children }) => {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-4 border-indigo-600 border-t-transparent" />
+        <div className="animate-spin rounded-full h-12 w-12 border-4 border-teal-600 border-t-transparent" />
       </div>
     );
   }
@@ -32,17 +32,19 @@ export const ProtectedRoute = ({ allowedRoles = [], children }) => {
   // Verificar rol si se especifican roles permitidos
   if (allowedRoles.length > 0) {
     const userRole = user?.rol?.toLowerCase();
-    const hasAccess = allowedRoles.some(role => role.toLowerCase() === userRole);
-    
+    const hasAccess = allowedRoles.some(
+      (role) => role.toLowerCase() === userRole,
+    );
+
     if (!hasAccess) {
       // Redirigir al dashboard correspondiente a su rol
       const dashboards = {
-        paciente: '/paciente',
-        medico: '/medico',
-        recepcionista: '/recepcionista',
-        administrador: '/admin',
+        paciente: "/paciente",
+        medico: "/medico",
+        recepcionista: "/recepcionista",
+        administrador: "/admin",
       };
-      const fallback = dashboards[userRole] || '/login';
+      const fallback = dashboards[userRole] || "/login";
       return <Navigate to={fallback} replace />;
     }
   }

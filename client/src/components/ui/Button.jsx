@@ -1,11 +1,11 @@
-// src/components/ui/Button.jsx
+// src/components/ui/Button.jsx - Estilo Clinicita Teal
 
-import React from 'react';
+import React from "react";
 
-export const Button = ({ children, onClick, className = '' }) => (
-  <button 
-    onClick={onClick} 
-    className={`px-6 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 transition duration-150 ${className}`}
+export const Button = ({ children, onClick, className = "" }) => (
+  <button
+    onClick={onClick}
+    className={`px-6 py-3 bg-teal-600 text-white font-semibold rounded-lg shadow-md hover:bg-teal-700 transition duration-150 ${className}`}
   >
     {children}
   </button>

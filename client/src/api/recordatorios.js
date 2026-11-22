@@ -1,9 +1,9 @@
-import apiClient from './apiClient';
+import apiClient from "./apiClient";
 
 export const recordatoriosApi = {
   // GET /api/recordatorios (Recep/Admin listar)
   listar: async (params = {}) => {
-    const response = await apiClient.get('/recordatorios', { params });
+    const response = await apiClient.get("/recordatorios", { params });
     return response.data;
   },
 

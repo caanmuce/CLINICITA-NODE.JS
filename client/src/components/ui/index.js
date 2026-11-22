@@ -10,8 +10,8 @@ export {
   slideRightVariants,
   scaleVariants,
   staggerContainerVariants,
-  staggerItemVariants
-} from './animationVariants';
+  staggerItemVariants,
+} from "./animationVariants";
 
 // AnimatedComponents.jsx (all animation components consolidated here)
 export {
@@ -26,11 +26,8 @@ export {
   AnimatedCard,
   AnimatedButton,
   Skeleton,
-  PageTransition
-} from './AnimatedComponents';
+  PageTransition,
+} from "./AnimatedComponents";
 
 // DashboardComponents.jsx - Reusable dashboard components
-export {
-  StatCard,
-  QuickAction
-} from './DashboardComponents';
+export { StatCard, QuickAction } from "./DashboardComponents";

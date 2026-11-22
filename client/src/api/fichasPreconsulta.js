@@ -1,9 +1,9 @@
 /**
  * ⚠️ PENDIENTE: Backend NO tiene endpoints para fichas de preconsulta
- * 
+ *
  * La tabla `fichas_preconsulta` existe en la BD (se crea en inicialización)
  * pero no hay endpoints REST implementados en server.js.
- * 
+ *
  * Cuando el backend implemente estos endpoints, descomentar y ajustar:
  */
 

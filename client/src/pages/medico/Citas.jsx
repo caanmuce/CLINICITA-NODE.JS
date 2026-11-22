@@ -1,1 +1,526 @@
-﻿// src/pages/medico/Citas.jsx - Gestión de citas del médico: listar, cambiar estado\n\nimport React, { useState, useEffect, useCallback } from 'react';\nimport { Calendar, Clock, User, Stethoscope, Search, Filter, CheckCircle, FileText, AlertCircle, Loader2, ChevronLeft, ChevronRight, UserCog, XCircle } from 'lucide-react';\nimport { citasApi } from '../../api/citas';\n\n// Funciones de utilidad\nconst formatDateTime = (dateStr) => {\n  if (!dateStr) return '—';\n  const date = new Date(dateStr);\n  return date.toLocaleDateString('es-CO', {\n    weekday: 'short',\n    day: 'numeric',\n    month: 'short',\n    year: 'numeric',\n    hour: '2-digit',\n    minute: '2-digit',\n    timeZone: 'America/Bogota'\n  });\n};\n\nconst formatTime = (dateStr) => {\n  if (!dateStr) return '—';\n  const date = new Date(dateStr);\n  return date.toLocaleTimeString('es-CO', {\n    hour: '2-digit',\n    minute: '2-digit',\n    hour12: false,\n    timeZone: 'America/Bogota'\n  });\n};\n\n// Mapeo de estados del backend (Title Case) a estilos\nconst getEstadoColor = (estado) => {\n  switch (estado) {\n    case 'Confirmada': return 'bg-green-100 text-green-800';\n    case 'Pendiente': return 'bg-yellow-100 text-yellow-800';\n    case 'Completada': return 'bg-purple-100 text-purple-800';\n    case 'Cancelada': return 'bg-red-100 text-red-800';\n    case 'No-Asistio': return 'bg-gray-100 text-gray-800';\n    default: return 'bg-gray-100 text-gray-800';\n  }\n};\n\nconst getEstadoLabel = (estado) => {\n  switch (estado) {\n    case 'Confirmada': return 'Confirmada';\n    case 'Pendiente': return 'Pendiente';\n    case 'Completada': return 'Completada';\n    case 'Cancelada': return 'Cancelada';\n    case 'No-Asistio': return 'No asistió';\n    default: return estado;\n  }\n};\n\nconst getEstadoIcon = (estado) => {\n  switch (estado) {\n    case 'Confirmada': return <CheckCircle className='h-4 w-4' />;\n    case 'Pendiente': return <Clock className='h-4 w-4' />;\n    case 'Completada': return <CheckCircle className='h-4 w-4' />;\n    case 'Cancelada': return <XCircle className='h-4 w-4' />;\n    case 'No-Asistio': return <UserCog className='h-4 w-4' />;\n    default: return <AlertCircle className='h-4 w-4' />;\n  }\n};\n\nconst getColombiaDate = () => {\n  const now = new Date();\n  const offset = -5 * 60;\n  const colombiaTime = new Date(now.getTime() + (offset + now.getTimezoneOffset()) * 60000);\n  return colombiaTime.toISOString().split('T')[0];\n};\n\n// Normalizar estado del backend para filtros internos\nconst normalizeEstado = (estado) => {\n  if (!estado) return '';\n  return estado.toLowerCase().replace(' ', '_').replace('-', '_');\n};\n\nexport const MedicoCitas = () => {\n  const [loading, setLoading] = useState(true);\n  const [error, setError] = useState(null);\n  const [citas, setCitas] = useState([]);\n  const [selectedDate, setSelectedDate] = useState(getColombiaDate());\n  const [searchTerm, setSearchTerm] = useState('');\n  const [estadoFilter, setEstadoFilter] = useState('');\n  const [showDetail, setShowDetail] = useState(null);\n  const [detailLoading, setDetailLoading] = useState(false);\n  const [changingState, setChangingState] = useState(null);\n\n  const cargarCitas = useCallback(async () => {\n    setLoading(true);\n    setError(null);\n    try {\n      const response = await citasApi.listarMedico(selectedDate);\n      const data = response.citas || response.data || response;\n      setCitas(data);\n    } catch (err) {\n      setError('Error al cargar las citas: ' + (err.message || 'Intente nuevamente'));\n    } finally {\n      setLoading(false);\n    }\n  }, [selectedDate]);\n\n  useEffect(() => {\n    cargarCitas();\n  }, [cargarCitas]);\n\n  const handleFechaChange = (dias) => {\n    const fecha = new Date(selectedDate);\n    fecha.setDate(fecha.getDate() + dias);\n    setSelectedDate(fecha.toISOString().split('T')[0]);\n  };\n\n  const isToday = selectedDate === getColombiaDate();\n\n  const citasFiltradas = citas.filter((cita) => {\n    const matchesSearch = !searchTerm || \n      (cita.paciente?.toLowerCase().includes(searchTerm.toLowerCase())) ||\n      (cita.documento_id?.toLowerCase().includes(searchTerm.toLowerCase())) ||\n      (cita.motivo?.toLowerCase().includes(searchTerm.toLowerCase()));\n    \n    const matchesEstado = !estadoFilter || normalizeEstado(cita.estado) === estadoFilter;\n    \n    return matchesSearch && matchesEstado;\n  });\n\n  const citasActivas = citasFiltradas.filter(c => \n    ['Confirmada', 'Pendiente'].includes(c.estado)\n  );\n\n  const citasHistorial = citasFiltradas.filter(c => \n    !['Confirmada', 'Pendiente'].includes(c.estado)\n  );\n\n  const estadosFiltro = [\n    { value: 'confirmada', label: 'Confirmada' },\n    { value: 'pendiente', label: 'Pendiente' },\n    { value: 'completada', label: 'Completada' },\n    { value: 'cancelada', label: 'Cancelada' },\n    { value: 'no_asistio', label: 'No asistiÃ³' },\n  ];\n\n  const handleCambiarEstado = async (citaId, nuevoEstado) => {\n    setChangingState(citaId);\n    try {\n      await citasApi.cambiarEstado(citaId, nuevoEstado);\n      setCitas(prev => prev.map(cita => \n        cita.cita_id === citaId ? { ...cita, estado: nuevoEstado } : cita\n      ));\n      setError(null);\n    } catch (err) {\n      setError('Error al cambiar estado: ' + (err.message || 'Intente nuevamente'));\n      cargarCitas();\n    } finally {\n      setChangingState(null);\n    }\n  };\n\n  const handleVerDetalle = async (cita) => {\n    setShowDetail(cita);\n  };\n\n  if (loading) {\n    return (\n      <div className="flex items-center justify-center min-h-[400px]">\n        <Loader2 className="h-12 w-12 animate-spin text-indigo-600" />\n      </div>\n    );\n  }\n\n  return (\n    <div className='space-y-6'>\n      <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4'>\n        <div>\n          <h1 className='text-2xl font-bold text-gray-900'>Mis Citas</h1>\n          <p className='text-gray-500 mt-1'>\n            {isToday ? "Citas para hoy" : "Citas para " + formatDateTime(selectedDate + "T00:00:00")}\n          </p>\n        </div>\n        <div className='flex items-center gap-4'>\n          <button onClick={() => handleFechaChange(-1)} className='p-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors' aria-label='Día anterior'><ChevronLeft className='h-5 w-5' /></button>\n          <input type='date' value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className='px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500' />\n          <button onClick={() => handleFechaChange(1)} className='p-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors' aria-label='Día siguiente'><ChevronRight className='h-5 w-5' /></button>\n        </div>\n      </div>\n\n      <div className='bg-white rounded-xl border border-gray-200 p-4'>\n        <div className='flex flex-col sm:flex-row gap-4'>\n          <div className='relative flex-1'>\n            <Search className='absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400' />\n            <input type='text' placeholder='Buscar paciente, DNI, motivo...' value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className='w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500' />\n          </div>\n          <select value={estadoFilter} onChange={(e) => setEstadoFilter(e.target.value)} className='px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500'>\n            <option value=''>Todos los estados</option>\n            {estadosFiltro.map(est => (\n              <option key={est.value} value={est.value}>{est.label}</option>\n            ))}\n          </select>\n        </div>\n      </div>\n\n      {citasActivas.length > 0 && (\n        <div className='bg-white rounded-xl border border-gray-200'>\n          <div className='p-4 border-b border-gray-200 bg-green-50'>\n            <h2 className='text-lg font-semibold text-gray-900 flex items-center gap-2'><Calendar className='h-5 w-5 text-green-600' /> Citas activas ({citasActivas.length})</h2>\n          </div>\n          <div className='divide-y divide-gray-200'>\n            {citasActivas.map((cita) => (\n              <div key={cita.cita_id} className='p-4 hover:bg-gray-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4'>\n                <div className='flex items-center gap-4 flex-1 min-w-0'>\n                  <div className='flex-shrink-0 w-16 h-16 bg-gray-100 rounded-xl flex items-center justify-center'><Calendar className='h-8 w-8 text-gray-400' /></div>\n                  <div className='min-w-0'>\n                    <div className='flex items-center gap-3'>\n                      <p className='font-semibold text-gray-900 truncate'>{cita.paciente || 'Paciente sin nombre'}</p>\n                      <span className={'inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ' + getEstadoColor(cita.estado)}>{getEstadoIcon(cita.estado)}{getEstadoLabel(cita.estado)}</span>\n                    </div>\n                    <div className='flex flex-wrap gap-4 text-sm text-gray-500 mt-1'><span className='flex items-center gap-1'><Clock className='h-4 w-4' /> {cita.hora || '—'}</span><span className='flex items-center gap-1'><Stethoscope className='h-4 w-4' /> {cita.sede || '—'}</span></div>\n                  </div>\n                </div>\n                <div className='flex items-center gap-2 flex-wrap'>\n                  <button onClick={() => handleVerDetalle(cita)} className='px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium flex items-center gap-2'><FileText className='h-4 w-4' /> Ver detalle</button>\n                  {cita.estado === 'Confirmada' || cita.estado === 'Pendiente' ? (\n                    <button onClick={() => handleCambiarEstado(cita.cita_id, 'Completada')} disabled={changingState === cita.cita_id} className='px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-2 disabled:opacity-50'>{changingState === cita.cita_id ? <Loader2 className='h-4 w-4 animate-spin' /> : <CheckCircle className='h-4 w-4' />} Finalizar</button>\n                  ) : cita.estado === 'Completada' ? (\n                    <span className='px-4 py-2 bg-gray-200 text-gray-500 rounded-lg text-sm font-medium flex items-center gap-2'><CheckCircle className='h-4 w-4' /> Atendida</span>\n                  ) : null}\n                </div>\n              </div>\n            ))}\n          </div>\n        </div>\n      )}\n\n      {citasHistorial.length > 0 && (\n        <div className='bg-white rounded-xl border border-gray-200 mt-6'>\n          <div className='p-4 border-b border-gray-200'><h2 className='text-lg font-semibold text-gray-900'>Historial ({citasHistorial.length})</h2></div>\n          <div className='divide-y divide-gray-200'>\n            {citasHistorial.map((cita) => (\n              <div key={cita.cita_id} className='p-4 hover:bg-gray-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4'>\n                <div className='flex items-center gap-4 flex-1 min-w-0'>\n                  <div className='flex-shrink-0 w-16 h-16 bg-gray-100 rounded-xl flex items-center justify-center'><Calendar className='h-8 w-8 text-gray-400' /></div>\n                  <div className='min-w-0'>\n                    <div className='flex items-center gap-3'>\n                      <p className='font-semibold text-gray-900 truncate'>{cita.paciente || 'Paciente sin nombre'}</p>\n                      <span className={'inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ' + getEstadoColor(cita.estado)}>{getEstadoIcon(cita.estado)}{getEstadoLabel(cita.estado)}</span>\n                    </div>\n                    <div className='flex flex-wrap gap-4 text-sm text-gray-500 mt-1'><span className='flex items-center gap-1'><Clock className='h-4 w-4' /> {cita.hora || '—'}</span><span className='flex items-center gap-1'><Stethoscope className='h-4 w-4' /> {cita.sede || '—'}</span></div>\n                  </div>\n                </div>\n                <button onClick={() => handleVerDetalle(cita)} className='px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium flex items-center gap-2'><FileText className='h-4 w-4' /> Ver detalle</button>\n              </div>\n            ))}\n          </div>\n        </div>\n      )}\n\n      {citasFiltradas.length === 0 && !loading && (\n        <div className='text-center py-12 bg-white rounded-xl border border-gray-200'>\n          <Calendar className='h-16 w-16 text-gray-300 mx-auto mb-4' />\n          <p className='text-gray-500 text-lg'>No hay citas para esta fecha</p>\n          <p className='text-gray-400 text-sm mt-1'>Intenta cambiar la fecha o los filtros</p>\n        </div>\n      )}\n\n      {showDetail && (\n        <div className='fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4' onClick={() => setShowDetail(null)}>\n          <div className='bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto' onClick={e => e.stopPropagation()}>\n            <div className='p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white z-10 rounded-t-2xl'>\n              <div><h3 className='text-xl font-bold text-gray-900'>{showDetail.paciente || 'Paciente'}</h3><p className='text-gray-500'>{showDetail.sede || ''} · {showDetail.hora ? selectedDate + ' ' + showDetail.hora : ''}</p></div>\n              <button onClick={() => setShowDetail(null)} className='p-2 hover:bg-gray-100 rounded-lg transition-colors'><AlertCircle className='h-6 w-6 text-gray-400' /></button>\n            </div>\n            <div className='p-6 space-y-4'>\n              <div className='grid grid-cols-2 gap-4'>\n                <div><p className='text-sm text-gray-500'>DNI</p><p className='font-medium'>{showDetail.documento_id || '—'}</p></div>\n                <div><p className='text-sm text-gray-500'>Sede</p><p className='font-medium'>{showDetail.sede || '—'}</p></div>\n                <div><p className='text-sm text-gray-500'>Hora</p><p className='font-medium'>{showDetail.hora || '—'}</p></div>\n                <div><p className='text-sm text-gray-500'>Estado</p><span className={'inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ' + getEstadoColor(showDetail.estado)}>{getEstadoIcon(showDetail.estado)}{getEstadoLabel(showDetail.estado)}</span></div>\n              </div>\n              {showDetail.motivo && <div><p className='text-sm text-gray-500'>Motivo de la consulta</p><p className='font-medium'>{showDetail.motivo}</p></div>}\n              {showDetail.preconsulta && showDetail.preconsulta.sintomas && (\n                <div className='bg-blue-50 border border-blue-200 rounded-lg p-4'>\n                  <p className='text-sm font-medium text-blue-900 mb-2 flex items-center gap-2'><FileText className='h-4 w-4' /> Ficha de pre-consulta</p>\n                  <div className='space-y-2 text-sm'>\n                    <p><strong>Síntomas:</strong> {showDetail.preconsulta.sintomas}</p>\n                  </div>\n                </div>\n              )}\n              <div className='pt-4 border-t border-gray-200 flex gap-3 justify-end'><button onClick={() => setShowDetail(null)} className='px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors'>Cerrar</button></div>\n            </div>\n          </div>\n        </div>\n      )}\n\n      {error && <div className='bg-red-50 border border-red-200 rounded-xl p-4'><p className='text-red-800 flex items-center gap-2'><AlertCircle className='h-5 w-5' /> {error}</p></div>}\n    </div>\n  );\n};\n\n\n\n\n\n\n\n\n\n\n\n\n\n
+// src/pages/medico/Citas.jsx - Gestión de citas del médico: listar, cambiar estado
+
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  Calendar,
+  Clock,
+  User,
+  Stethoscope,
+  Search,
+  Filter,
+  CheckCircle,
+  FileText,
+  AlertCircle,
+  Loader2,
+  ChevronLeft,
+  ChevronRight,
+  UserCog,
+  XCircle,
+  ShieldAlert,
+  TrendingUp,
+  HeartPulse,
+} from "lucide-react";
+import { citasApi } from "../../api/citas";
+import { pacientesApi } from "../../api/pacientes";
+
+// Funciones de utilidad
+const formatDateTime = (dateStr) => {
+  if (!dateStr) return "—";
+  const date = new Date(dateStr);
+  return date.toLocaleDateString("es-CO", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "America/Bogota",
+  });
+};
+
+const formatTime = (dateStr) => {
+  if (!dateStr) return "—";
+  const date = new Date(dateStr);
+  return date.toLocaleTimeString("es-CO", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "America/Bogota",
+  });
+};
+
+// Mapeo de estados del backend (Title Case) a estilos
+const getEstadoColor = (estado) => {
+  switch (estado) {
+    case "Confirmada":
+      return "bg-green-100 text-green-800";
+    case "Pendiente":
+      return "bg-yellow-100 text-yellow-800";
+    case "Completada":
+      return "bg-purple-100 text-purple-800";
+    case "Cancelada":
+      return "bg-red-100 text-red-800";
+    case "No-Asistio":
+      return "bg-gray-100 text-gray-800";
+    default:
+      return "bg-gray-100 text-gray-800";
+  }
+};
+
+const getEstadoLabel = (estado) => {
+  switch (estado) {
+    case "Confirmada":
+      return "Confirmada";
+    case "Pendiente":
+      return "Pendiente";
+    case "Completada":
+      return "Completada";
+    case "Cancelada":
+      return "Cancelada";
+    case "No-Asistio":
+      return "No asistió";
+    default:
+      return estado;
+  }
+};
+
+const getEstadoIcon = (estado) => {
+  switch (estado) {
+    case "Confirmada":
+      return <CheckCircle className="h-4 w-4" />;
+    case "Pendiente":
+      return <Clock className="h-4 w-4" />;
+    case "Completada":
+      return <CheckCircle className="h-4 w-4" />;
+    case "Cancelada":
+      return <XCircle className="h-4 w-4" />;
+    case "No-Asistio":
+      return <UserCog className="h-4 w-4" />;
+    default:
+      return <AlertCircle className="h-4 w-4" />;
+  }
+};
+
+// Riesgo ML colors
+const getRiesgoColor = (nivel) => {
+  switch (nivel) {
+    case "Crítico":
+      return "bg-red-100 text-red-800 border border-red-200";
+    case "Alto":
+      return "bg-orange-100 text-orange-800 border border-orange-200";
+    case "Medio":
+      return "bg-yellow-100 text-yellow-800 border border-yellow-200";
+    case "Bajo":
+      return "bg-green-100 text-green-800 border border-green-200";
+    default:
+      return "bg-gray-100 text-gray-800 border border-gray-200";
+  }
+};
+
+const getRiesgoIcon = (nivel) => {
+  switch (nivel) {
+    case "Crítico":
+      return <ShieldAlert className="h-3 w-3" />;
+    case "Alto":
+      return <AlertCircle className="h-3 w-3" />;
+    case "Medio":
+      return <TrendingUp className="h-3 w-3" />;
+    case "Bajo":
+      return <HeartPulse className="h-3 w-3" />;
+    default:
+      return <ShieldAlert className="h-3 w-3" />;
+  }
+};
+
+const getColombiaDate = () => {
+  const now = new Date();
+  const offset = -5 * 60;
+  const colombiaTime = new Date(
+    now.getTime() + (offset + now.getTimezoneOffset()) * 60000,
+  );
+  return colombiaTime.toISOString().split("T")[0];
+};
+
+// Normalizar estado del backend para filtros internos
+const normalizeEstado = (estado) => {
+  if (!estado) return "";
+  return estado.toLowerCase().replace(" ", "_").replace("-", "_");
+};
+
+// Componente principal
+const MedicoCitas = () => {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [citas, setCitas] = useState([]);
+  const [selectedDate, setSelectedDate] = useState(getColombiaDate());
+  const [searchTerm, setSearchTerm] = useState("");
+  const [estadoFilter, setEstadoFilter] = useState("");
+  const [showDetail, setShowDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [changingState, setChangingState] = useState(null);
+  const [riesgos, setRiesgos] = useState({}); // mapa paciente_id -> riesgo
+
+  // Cargar riesgos en batch para los pacientes de las citas cargadas
+  const cargarRiesgosBatch = useCallback(async (citaPacienteIds) => {
+    if (!citaPacienteIds.length) return;
+    try {
+      const response = await pacientesApi.verRiesgoBatch(citaPacienteIds);
+      const riesgosData = response?.riesgos || response || {};
+      // Convertir a mapa para lookup rápido
+      const mapaRiesgos = {};
+      Object.entries(riesgosData).forEach(([pid, riesgo]) => {
+        mapaRiesgos[Number(pid)] = riesgo;
+      });
+      setRiesgos(mapaRiesgos);
+    } catch (e) {
+      console.warn("No se pudieron cargar riesgos:", e);
+      setRiesgos({});
+    }
+  }, []);
+
+  const cargarCitas = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await citasApi.listarMedico(selectedDate);
+      const data = response.citas || response.data || response;
+      setCitas(data);
+
+      // Extraer IDs de pacientes únicos y cargar sus riesgos
+      const pacienteIds = [
+        ...new Set((data || []).map((c) => c.paciente_id).filter(Boolean)),
+      ];
+      if (pacienteIds.length > 0) {
+        cargarRiesgosBatch(pacienteIds);
+      }
+    } catch (err) {
+      setError(
+        "Error al cargar las citas: " + (err.message || "Intente nuevamente"),
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedDate, cargarRiesgosBatch]);
+
+  useEffect(() => {
+    cargarCitas();
+  }, [cargarCitas]);
+
+  const handleFechaChange = (dias) => {
+    const fecha = new Date(selectedDate);
+    fecha.setDate(fecha.getDate() + dias);
+    setSelectedDate(fecha.toISOString().split("T")[0]);
+  };
+
+  const isToday = selectedDate === getColombiaDate();
+
+  const citasFiltradas = citas.filter((cita) => {
+    const matchesSearch =
+      !searchTerm ||
+      cita.paciente?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      cita.documento_id?.includes(searchTerm) ||
+      cita.motivo?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesEstado =
+      !estadoFilter || normalizeEstado(cita.estado) === estadoFilter;
+    return matchesSearch && matchesEstado;
+  });
+
+  const handleVerDetalle = async (cita) => {
+    setShowDetail(cita);
+    setDetailLoading(true);
+    try {
+      // Cargar ficha de preconsulta si existe
+      const { fichasPreconsultaApi } =
+        await import("../../api/fichasPreconsulta");
+      const response = await fichasPreconsultaApi.obtenerPorCita(cita.cita_id);
+      const preconsulta = response.data || response;
+      setShowDetail((prev) => (prev ? { ...prev, preconsulta } : null));
+    } catch (e) {
+      console.warn("No hay ficha de preconsulta o error:", e);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const handleCambiarEstado = async (citaId, nuevoEstado) => {
+    setChangingState(citaId);
+    try {
+      await citasApi.cambiarEstado(citaId, nuevoEstado);
+      await cargarCitas();
+    } catch (err) {
+      setError(
+        "Error al cambiar estado: " + (err.message || "Intente nuevamente"),
+      );
+    } finally {
+      setChangingState(null);
+    }
+  };
+
+  const handleNoShow = async (citaId) => {
+    if (
+      !window.confirm(
+        '¿Marcar como "No asistió"? Esta acción no se puede deshacer.',
+      )
+    )
+      return;
+    await handleCambiarEstado(citaId, "No-Asistio");
+  };
+
+  return (
+    <div className="space-y-6 p-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Mis Citas</h1>
+          <p className="text-gray-500 mt-1">
+            Gestiona tu agenda médica del día
+          </p>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2 shadow-sm">
+            <button
+              onClick={() => handleFechaChange(-1)}
+              disabled={!isToday}
+              className="p-2 text-gray-600 hover:text-teal-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+            <span className="font-medium text-gray-900 min-w-[140px] text-center">
+              {formatDateTime(selectedDate + "T00:00:00")}
+            </span>
+            <button
+              onClick={() => handleFechaChange(1)}
+              className="p-2 text-gray-600 hover:text-teal-600 transition-colors"
+            >
+              <ChevronRight className="h-5 w-5" />
+            </button>
+          </div>
+          <button
+            onClick={() => handleFechaChange(0)}
+            className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors flex items-center gap-2"
+          >
+            <Calendar className="h-4 w-4" /> Hoy
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <p className="text-red-800 flex items-center gap-2">
+            <AlertCircle className="h-5 w-5" /> {error}
+          </p>
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <div className="flex flex-col sm:flex-row gap-4 mb-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Buscar paciente, DNI, motivo..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Filtrar por estado
+            </label>
+            <select
+              value={estadoFilter}
+              onChange={(e) => setEstadoFilter(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+            >
+              <option value="">Todos</option>
+              <option value="confirmada">Confirmada</option>
+              <option value="pendiente">Pendiente</option>
+              <option value="completada">Completada</option>
+              <option value="cancelada">Cancelada</option>
+              <option value="no_asistio">No asistió</option>
+            </select>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="text-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin mx-auto text-teal-600" />
+          </div>
+        ) : citasFiltradas.length === 0 ? (
+          <div className="text-center py-12">
+            <Calendar className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+            <p className="text-gray-500 text-lg">
+              No hay citas para esta fecha
+            </p>
+            <p className="text-gray-400 text-sm mt-1">
+              Intenta cambiar la fecha o los filtros
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {citasFiltradas.map((cita) => (
+              <div
+                key={cita.cita_id}
+                className="bg-white rounded-xl border border-gray-200 p-4 hover:border-teal-300 transition-colors"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div className="flex items-center gap-4 flex-1 min-w-0">
+                    <div className="p-3 bg-teal-100 rounded-lg flex-shrink-0">
+                      <User className="h-6 w-6 text-teal-600" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-900 truncate">
+                        {cita.paciente || "Paciente"}
+                      </p>
+                      <div className="flex flex-wrap gap-4 text-sm text-gray-500 mt-1">
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-4 w-4" /> {cita.hora || "—"}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Stethoscope className="h-4 w-4" /> {cita.sede || "—"}
+                        </span>
+                      </div>
+                      {/* Mostrar riesgo no-show del paciente */}
+                      {riesgos[cita.paciente_id] && (
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium mt-1 ${getRiesgoColor(riesgos[cita.paciente_id].nivel)}`}
+                        >
+                          {getRiesgoIcon(riesgos[cita.paciente_id].nivel)}
+                          {riesgos[cita.paciente_id].nivel}
+                          {riesgos[cita.paciente_id].score !== undefined && (
+                            <> • {riesgos[cita.paciente_id].score}/100</>
+                          )}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <span
+                      className={
+                        "inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium " +
+                        getEstadoColor(cita.estado)
+                      }
+                    >
+                      {getEstadoIcon(cita.estado)}
+                      {getEstadoLabel(cita.estado)}
+                    </span>
+                    <button
+                      onClick={() => handleVerDetalle(cita)}
+                      className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium flex items-center gap-2"
+                    >
+                      <FileText className="h-4 w-4" /> Ver detalle
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showDetail && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={() => setShowDetail(null)}
+        >
+          <div
+            className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white z-10 rounded-t-2xl">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">
+                  {showDetail.paciente || "Paciente"}
+                </h3>
+                <p className="text-gray-500">
+                  {showDetail.sede || ""} ·{" "}
+                  {showDetail.hora ? selectedDate + " " + showDetail.hora : ""}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowDetail(null)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <AlertCircle className="h-6 w-6 text-gray-400" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-gray-500">DNI</p>
+                  <p className="font-medium">
+                    {showDetail.documento_id || "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Sede</p>
+                  <p className="font-medium">{showDetail.sede || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Hora</p>
+                  <p className="font-medium">{showDetail.hora || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Estado</p>
+                  <span
+                    className={
+                      "inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium " +
+                      getEstadoColor(showDetail.estado)
+                    }
+                  >
+                    {getEstadoIcon(showDetail.estado)}
+                    {getEstadoLabel(showDetail.estado)}
+                  </span>
+                </div>
+                {/* Riesgo en el detalle */}
+                {riesgos[showDetail.paciente_id] && (
+                  <div className="col-span-2">
+                    <p className="text-sm text-gray-500">Riesgo No-Show</p>
+                    <span
+                      className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ${getRiesgoColor(riesgos[showDetail.paciente_id].nivel)}`}
+                    >
+                      {getRiesgoIcon(riesgos[showDetail.paciente_id].nivel)}
+                      {riesgos[showDetail.paciente_id].nivel}
+                      {riesgos[showDetail.paciente_id].score !== undefined && (
+                        <> • {riesgos[showDetail.paciente_id].score}/100</>
+                      )}
+                    </span>
+                  </div>
+                )}
+              </div>
+              {showDetail.motivo && (
+                <div>
+                  <p className="text-sm text-gray-500">Motivo de la consulta</p>
+                  <p className="font-medium">{showDetail.motivo}</p>
+                </div>
+              )}
+              {showDetail.preconsulta && showDetail.preconsulta.sintomas && (
+                <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
+                  <p className="text-sm font-medium text-teal-900 mb-2 flex items-center gap-2">
+                    <FileText className="h-4 w-4" /> Ficha de pre-consulta
+                  </p>
+                  <div className="space-y-2 text-sm">
+                    <p>
+                      <strong>Síntomas:</strong>{" "}
+                      {showDetail.preconsulta.sintomas}
+                    </p>
+                  </div>
+                </div>
+              )}
+              <div className="pt-4 border-t border-gray-200 flex gap-3 justify-end">
+                <button
+                  onClick={() => setShowDetail(null)}
+                  className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default MedicoCitas;

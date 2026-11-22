@@ -1,15 +1,15 @@
-import apiClient from './apiClient';
+import apiClient from "./apiClient";
 
 export const citasApi = {
   // POST /api/citas (Paciente agenda su cita)
   crear: async (data) => {
-    const response = await apiClient.post('/citas', data);
+    const response = await apiClient.post("/citas", data);
     return response.data;
   },
 
   // GET /api/citas (Paciente lista sus citas)
   listarMisCitas: async () => {
-    const response = await apiClient.get('/citas');
+    const response = await apiClient.get("/citas");
     return response.data;
   },
 
@@ -33,7 +33,7 @@ export const citasApi = {
 
   // GET /api/citas/admin (Recepcionista/Admin lista todas)
   listarAdmin: async (params = {}) => {
-    const response = await apiClient.get('/citas/admin', { params });
+    const response = await apiClient.get("/citas/admin", { params });
     return response.data;
   },
 
@@ -45,7 +45,9 @@ export const citasApi = {
 
   // GET /api/citas/medico (Médico ve su agenda)
   listarMedico: async (fecha) => {
-    const response = await apiClient.get('/citas/medico', { params: { fecha } });
+    const response = await apiClient.get("/citas/medico", {
+      params: { fecha },
+    });
     return response.data;
   },
 
@@ -57,7 +59,7 @@ export const citasApi = {
 
   // POST /api/citas/admin (Recepcionista/Admin agenda a nombre de paciente)
   crearAdmin: async (data) => {
-    const response = await apiClient.post('/citas/admin', data);
+    const response = await apiClient.post("/citas/admin", data);
     return response.data;
   },
 

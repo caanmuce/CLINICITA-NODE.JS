@@ -1,242 +1,447 @@
-// src/pages/LoginPage.jsx
-// Login oficial de CliniCita — réplica fiel del diseño en public/pages/login.html
-// Mantiene toda la lógica React: AuthContext, apiClient, React Router, validaciones, loading, errores.
-
-import React, { useState, useCallback, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import apiClient from '../api/apiClient';
-import { Loader } from 'lucide-react';
-
-const RUTAS_POR_ROL = {
-  paciente: '/paciente',
-  medico: '/medico',
-  recepcionista: '/recepcionista',
-  administrador: '/admin'
-};
-
-const CLINICITA_COLORS = {
-  dark: '#1B2A4A',
-  mid: '#2E5090',
-  light: '#E8F0FE',
-  accent: '#00B4D8',
-  white: '#FFFFFF',
-  grayBg: '#F8FAFC',
-  textDark: '#1E293B',
-  textMuted: '#64748B',
-  errorBg: '#FEF2F2',
-  errorBorder: '#FECACA',
-  errorText: '#B91C1C',
-};
+﻿// src/pages/LoginPage.jsx - Login de Clinicita (rediseño moderno SaaS médico)
+import React, { useState, useCallback, useEffect } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import apiClient from "../api/apiClient";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Loader,
+  HeartPulse,
+  Mail,
+  Lock,
+  UserCog,
+  AlertCircle,
+  Shield,
+  Stethoscope,
+  Calendar,
+  Users,
+  CheckCircle,
+  Sparkles,
+  Eye,
+  EyeOff,
+} from "lucide-react";
 
 const LoginPage = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [correo, setCorreo] = useState('');
-  const [clave, setClave] = useState('');
-  const [rol, setRol] = useState('');
+  const [correo, setCorreo] = useState("");
+  const [clave, setClave] = useState("");
+  const [rol, setRol] = useState("paciente");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [focusedField, setFocusedField] = useState(null);
 
   useEffect(() => {
-    const correoInput = document.getElementById('correo');
+    const correoInput = document.getElementById("correo");
     if (correoInput) correoInput.focus();
   }, []);
 
-  const handleLogin = useCallback(async (e) => {
-    e.preventDefault();
-    if (!correo || !clave || !rol) {
-      setError('Por favor, completa todos los campos.');
-      return;
-    }
-    setIsLoading(true);
-    setError(null);
-    try {
-      const response = await apiClient.post('/auth/login', { correo, clave, rol });
-      const token = response.data.token; 
-      const userData = response.data.usuario;
-      login(token, userData);
-      const rutaDestino = RUTAS_POR_ROL[rol];
-      if (rutaDestino) {
-        navigate(rutaDestino, { replace: true });
-      } else {
-        throw new Error('Rol no reconocido');
-      }
-    } catch (err) {
-      console.error('Login error:', err.response ? err.response.data : err.message);
-      setError(err.response?.data?.mensaje || 'Error de autenticación. Intenta de nuevo.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [correo, clave, rol, login, navigate]);
-
-  const handleTogglePassword = () => {
-    setShowPassword(!showPassword);
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: { staggerChildren: 0.1, delayChildren: 0.2 },
+    },
   };
 
+  const itemVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: {
+      opacity: 1,
+      y: 0,
+      transition: { duration: 0.5, ease: "easeOut" },
+    },
+  };
+
+  const panelVariants = {
+    hidden: { opacity: 0, x: -30 },
+    visible: { opacity: 1, x: 0, transition: { duration: 0.6, ease: "easeOut" } },
+  };
+
+  const formVariants = {
+    hidden: { opacity: 0, x: 30 },
+    visible: { opacity: 1, x: 0, transition: { duration: 0.6, ease: "easeOut", delay: 0.2 } },
+  };
+
+  const prefersReducedMotion = typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // const containerVariants = { // unused - keeping for reference
+  //   hidden: { opacity: 0 },
+  //   visible: {
+  //     opacity: 1,
+  //     transition: { staggerChildren: 0.1, delayChildren: 0.2 },
+  //   },
+  // };
+
+  const handleLogin = useCallback(
+    async (e) => {
+      e.preventDefault();
+      if (!correo || !clave || !rol) {
+        setError("Por favor, completa correo, contraseña y selecciona un rol.");
+        return;
+      }
+      setIsLoading(true);
+      setError(null);
+      try {
+        const response = await apiClient.post("/auth/login", {
+          correo,
+          clave,
+          rol,
+        });
+        const token = response.data.token;
+        const userData = response.data.usuario;
+        login(token, userData);
+        const rolUsuario = userData?.rol || userData?.role || "paciente";
+        const RUTAS_POR_ROL = {
+          paciente: "/paciente",
+          medico: "/medico",
+          recepcionista: "/recepcionista",
+          administrador: "/admin",
+        };
+        const rutaDestino = RUTAS_POR_ROL[rolUsuario];
+        if (rutaDestino) {
+          navigate(rutaDestino, { replace: true });
+        } else {
+          navigate("/paciente", { replace: true });
+        }
+      } catch (err) {
+        console.error(
+          "Login error:",
+          err.response ? err.response.data : err.message,
+        );
+        setError(
+          err.response?.data?.mensaje ||
+            "Error de autenticación. Intenta de nuevo.",
+        );
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [correo, clave, rol, login, navigate],
+  );
+
   return (
-    <div 
-      className="min-h-screen flex items-center justify-center py-12 px-4"
-      style={{ backgroundColor: CLINICITA_COLORS.grayBg }}
-      role="main"
-    >
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <a href="/" className="inline-flex items-center text-decoration-none" aria-label="CliniCita - Inicio">
-            <svg 
-              className="w-8 h-8 mr-2" 
-              fill="currentColor" 
-              viewBox="0 0 16 16" 
-              aria-hidden="true"
-              style={{ color: CLINICITA_COLORS.mid }}
+    <div className="min-h-screen bg-gradient-to-br from-teal-50 via-white to-teal-50 flex" role="main">
+      {/* Panel izquierdo - Informativo */}
+      <motion.div
+        className="hidden lg:flex lg:w-1/2 flex-col items-center justify-center p-12 relative overflow-hidden"
+        {...(prefersReducedMotion ? {} : { variants: panelVariants, initial: "hidden", animate: "visible" })}
+      >
+        {/* Elementos decorativos de fondo */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-teal-100/50 rounded-full blur-3xl animate-pulse" />
+          <div className="absolute bottom-1/4 right-1/4 w-72 h-72 bg-teal-200/30 rounded-full blur-3xl animate-pulse" style={{animationDelay: "1s"}} />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-teal-100/30 rounded-full blur-3xl animate-pulse" style={{animationDelay: "2s"}} />
+        </div>
+       
+        <div className="relative z-10 max-w-lg w-full text-center">
+          {/* Logo */}
+          <motion.div
+            {...(prefersReducedMotion ? {} : { variants: itemVariants })}
+            className="mb-10"
+          >
+            <Link
+              to="/"
+              className="inline-flex items-center gap-4"
+              aria-label="Clinica - Inicio"
             >
-              <path d="M8 1.5a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-1 0V2a.5.5 0 0 1 .5-.5zM3.5 4a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 0 1h-1a.5.5 0 0 1-.5-.5zM14.5 4a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 0 1h-1a.5.5 0 0 1-.5-.5zM2.146 5.646a.5.5 0 0 1 .708 0L4 7.293l1.146-1.147a.5.5 0 1 1 .708.708L4.707 8l1.147 1.146a.5.5 0 0 1-.708.708L4 8.707l-1.146 1.147a.5.5 0 0 1-.708-.708L3.293 8 2.146 6.854a.5.5 0 0 1 0-.708zM13.854 5.646a.5.5 0 0 1 .708 0l1.147 1.147a.5.5 0 0 1-.708.708L14.707 8l1.146 1.147a.5.5 0 0 1-.708.708L14 8.707l-1.146 1.147a.5.5 0 0 1-.708-.708L13.293 8 12.146 6.854a.5.5 0 0 1 0-.708zM8 11.5a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 0 1h-1a.5.5 0 0 1-.5-.5z"/>
-              <path d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5v1.5H2.5V8a5.5 5.5 0 1 1 5.5-5.5z"/>
-            </svg>
-            <span className="text-2xl font-bold" style={{ 
-              color: CLINICITA_COLORS.dark,
-              fontFamily: '"Playfair Display", Georgia, serif',
-              fontWeight: 900
-            }}>
-              Clini<span style={{ color: CLINICITA_COLORS.mid }}>Cita</span>
-            </span>
-          </a>
+              <motion.div
+                whileHover={{scale: 1.1, rotate: 5}}
+                whileTap={{scale: 0.95}}
+                className="p-4 rounded-2xl bg-gradient-to-br from-teal-500 to-teal-700 shadow-lg shadow-teal-500/25"
+              >
+                <HeartPulse className="h-10 w-10 text-white" aria-hidden="true" />
+              </motion.div>
+              <span className="font-serif font-bold text-4xl tracking-tight text-gray-900 self-center">
+                Clini<span className="text-teal-600">Cita</span>
+              </span>
+            </Link>
+          </motion.div>
+         
+          {/* Título y mensaje principal */}
+          <motion.div
+            {...(prefersReducedMotion ? {} : { variants: itemVariants })}
+            className="mb-8"
+          >
+            <h1 className="text-4xl lg:text-5xl font-bold text-gray-900 leading-tight mb-6">
+              Simplifica la <span className="text-teal-600">gestión de tu clínica</span> con tecnología moderna
+            </h1>
+            <p className="text-lg lg:text-xl text-gray-600 mb-8 max-w-xl mx-auto leading-relaxed">
+              Sistema integral de citas, pacientes, historial médico y predicción de no-show con ML.
+              Diseñado para equipos médicos que valoran la eficiencia y la experiencia del paciente.
+            </p>
+          </motion.div>
+          {/* Características destacadas */}
+          <motion.div
+            {...(prefersReducedMotion ? {} : { variants: itemVariants })}
+            className="grid grid-cols-3 gap-6 mb-10"
+          >
+            <div className="p-4 bg-white/80 backdrop-blur-sm rounded-2xl border border-teal-100 hover:border-teal-200 hover:shadow-lg transition-all duration-300">
+              <div className="p-3 rounded-xl bg-teal-100 text-teal-600 mb-3 inline-flex">
+                <Calendar className="h-6 w-6" aria-hidden="true" />
+              </div>
+              <h3 className="font-semibold text-gray-900 mb-1">Agenda Inteligente</h3>
+              <p className="text-sm text-gray-500">Gestión de citas optimizada</p>
+            </div>
+            <div className="p-4 bg-white/80 backdrop-blur-sm rounded-2xl border border-teal-100 hover:border-teal-200 hover:shadow-lg transition-all duration-300">
+              <div className="p-3 rounded-xl bg-teal-100 text-teal-600 mb-3 inline-flex">
+                <Users className="h-6 w-6" aria-hidden="true" />
+              </div>
+              <h3 className="font-semibold text-gray-900 mb-1">Pacientes 360°</h3>
+              <p className="text-sm text-gray-500">Historial completo unificado</p>
+            </div>
+            <div className="p-4 bg-white/80 backdrop-blur-sm rounded-2xl border border-teal-100 hover:border-teal-200 hover:shadow-lg transition-all duration-300">
+              <div className="p-3 rounded-xl bg-teal-100 text-teal-600 mb-3 inline-flex">
+                <Sparkles className="h-6 w-6" aria-hidden="true" />
+              </div>
+              <h3 className="font-semibold text-gray-900 mb-1">ML No-Show</h3>
+              <p className="text-sm text-gray-500">Predicción de ausencias</p>
+            </div>
+          </motion.div>
+
+          {/* Estadísticas de confianza */}
+          <motion.div
+            {...(prefersReducedMotion ? {} : { variants: itemVariants })}
+            className="flex flex-col sm:flex-row justify-center gap-8 text-center pt-8 border-t border-teal-100">
+            <div>
+              <p className="text-3xl font-bold text-teal-600 mb-1">500+</p>
+              <p className="text-sm text-gray-500">Profesionales activos</p>
+            </div>
+            <div>
+              <p className="text-3xl font-bold text-teal-600 mb-1">50K+</p>
+              <p className="text-sm text-gray-500">Citas gestionadas</p>
+            </div>
+            <div>
+              <p className="text-3xl font-bold text-teal-600 mb-1">99.9%</p>
+              <p className="text-sm text-gray-500">Uptime garantizado</p>
+            </div>
+          </motion.div>
         </div>
 
-        <div 
-          className="rounded-2xl shadow-xl overflow-hidden"
-          style={{ 
-            backgroundColor: CLINICITA_COLORS.white,
-            border: `1px solid ${CLINICITA_COLORS.light}`,
-            boxShadow: '0 20px 40px -15px rgba(27, 42, 74, 0.15)'
-          }}
-        >
-          <div 
-            className="px-6 py-4"
-            style={{ 
-              backgroundColor: CLINICITA_COLORS.dark,
-              borderBottom: `1px solid ${CLINICITA_COLORS.mid}`
-            }}
+        {/* Elementos decorativos flotantes */}
+        <div className="absolute bottom-8 left-8 right-8 flex justify-center gap-4 pointer-events-none" aria-hidden="true">
+          <motion.div
+            animate={{y: [0, -10, 0]}}
+            transition={{duration: 3, repeat: Infinity, ease: "easeInOut"}}
+            className="p-3 rounded-xl bg-white/60 backdrop-blur-sm border border-teal-100 shadow-lg"
           >
-            <h1 className="text-xl font-semibold text-white text-center m-0" style={{ 
-              fontFamily: '"Playfair Display", Georgia, serif',
-              fontWeight: 700,
-              letterSpacing: '0.5px'
-            }}>
-              Iniciar sesión
-            </h1>
-          </div>
+            <Shield className="h-5 w-5 text-teal-600" />
+          </motion.div>
+          <motion.div
+            animate={{y: [0, -15, 0]}}
+            transition={{duration: 4, repeat: Infinity, ease: "easeInOut", delay: 0.5}}
+            className="p-3 rounded-xl bg-white/60 backdrop-blur-sm border border-teal-100 shadow-lg"
+          >
+            <Stethoscope className="h-5 w-5 text-teal-600" />
+          </motion.div>
+          <motion.div
+            animate={{y: [0, -8, 0]}}
+            transition={{duration: 3.5, repeat: Infinity, ease: "easeInOut", delay: 1}}
+            className="p-3 rounded-xl bg-white/60 backdrop-blur-sm border border-teal-100 shadow-lg"
+          >
+            <CheckCircle className="h-5 w-5 text-teal-600" />
+          </motion.div>
+        </div>
+      </motion.div>
 
-          <div className="p-6 md:p-8">
-            {error && (
-              <div 
-                className="mb-6 p-4 rounded-lg text-sm flex items-center gap-3 animate-slide-down"
-                role="alert"
-                style={{ 
-                  backgroundColor: CLINICITA_COLORS.errorBg,
-                  border: `1px solid ${CLINICITA_COLORS.errorBorder}`,
-                  color: CLINICITA_COLORS.errorText
-                }}
-              >
-                <svg className="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
-                  <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
-                  <path d="M8 4a.5.5 0 0 1 .5.5v3.5a.5.5 0 0 1-1 0V8a.5.5 0 0 1 .5-.5z"/>
-                  <path d="M8 10a.5.5 0 0 1 .5.5v1.5a.5.5 0 0 1-1 0v-1.5A.5.5 0 0 1 8 10z"/>
-                </svg>
-                <span className="flex-1">{error}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleLogin} className="space-y-5" noValidate>
-              {/* Campo: Tipo de usuario */}
-              <div>
-                <label htmlFor="rol" className="block text-sm font-medium mb-1.5" style={{ color: CLINICITA_COLORS.textDark }}>
-                  Tipo de usuario
+      {/* Panel derecho - Formulario */}
+      <motion.div
+        className="flex w-full lg:w-1/2 flex-col items-center justify-center p-8 lg:p-12"
+        {...(prefersReducedMotion ? {} : { variants: formVariants, initial: "hidden", animate: "visible" })}
+      >
+{/* Animar error */}
+            <AnimatePresence mode="wait">
+              {error && (
+                <motion.div
+                  key="error"
+                  initial={{opacity: 0, y: -10, scale: 0.98}}
+                  animate={{opacity: 1, y: 0, scale: 1}}
+                  exit={{opacity: 0, y: -10, scale: 0.98}}
+                  className="mb-6 p-4 rounded-xl flex items-center gap-3 bg-red-50 border border-red-200 text-red-800"
+                  role="alert"
+                >
+                  <AlertCircle className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
+                  <span className="text-sm">{error}</span>
+                </motion.div>
+              )}
+            </AnimatePresence>
+           
+            <form onSubmit={handleLogin} noValidate className="space-y-5">
+              {/* Campo Correo */}
+              <motion.div
+                {...(prefersReducedMotion ? {} : { variants: itemVariants, transition: { duration: 0.3 } })}
+                className="relative">
+                <label
+                  htmlFor="correo"
+                  className="block text-sm font-medium text-gray-700 mb-2">
+                  Correo electrónico
                 </label>
                 <div className="relative">
-                  <select id="rol" name="rol" required value={rol} onChange={(e) => setRol(e.target.value)} disabled={isLoading} className="w-full appearance-none pl-4 pr-10 py-3 border rounded-lg text-base transition-all duration-200" style={{ backgroundColor: CLINICITA_COLORS.white, borderColor: '#E2E8F0', color: CLINICITA_COLORS.textDark, boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)' }} aria-describedby="rol-error">
-                    <option value="">Selecciona tu rol</option>
+                  <Mail
+                    className={`absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 transition-colors duration-200 ${focusedField === "correo" ? "text-teal-500" : "text-gray-400"}`}
+                    aria-hidden="true"
+                  />
+                  <input
+                    type="email"
+                    id="correo"
+                    name="correo"
+                    required
+                    autoComplete="email"
+                    value={correo}
+                    onChange={(e) => setCorreo(e.target.value)}
+                    onFocus={() => setFocusedField("correo")}
+                    onBlur={() => setFocusedField(null)}
+                    disabled={isLoading}
+                    className={`w-full pl-10 pr-4 py-3.5 rounded-xl border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 ${error && !correo ? "border-red-300 bg-red-50" : "border-gray-200 bg-gray-50"}`}
+                    placeholder="tu@correo.com"
+                    aria-describedby="correo-error"
+                    aria-invalid={error && !correo}
+                  />
+                </div>
+              </motion.div>
+             
+              {/* Campo Clave */}
+              <motion.div
+                {...(prefersReducedMotion ? {} : { variants: itemVariants })}
+                className="relative">
+                <label
+                  htmlFor="clave"
+                  className="block text-sm font-medium text-gray-700 mb-2">
+                  Contraseña
+                </label>
+                <div className="relative">
+                  <Lock
+                    className={`absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 transition-colors duration-200 ${focusedField === "clave" ? "text-teal-500" : "text-gray-400"}`}
+                    aria-hidden="true" />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    id="clave"
+                    name="clave"
+                    required
+                    autoComplete="current-password"
+                    value={clave}
+                    onChange={(e) => setClave(e.target.value)}
+                    onFocus={() => setFocusedField("clave")}
+                    onBlur={() => setFocusedField(null)}
+                    disabled={isLoading}
+                    className={`w-full pl-10 pr-12 py-3.5 rounded-xl border appearance-none cursor-pointer transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 ${error && !clave ? "border-red-300 bg-red-50" : "border-gray-200 bg-gray-50"}`}
+                    placeholder="••••••••"
+                    aria-describedby="clave-error"
+                    aria-invalid={error && !clave}
+                  />
+                </div>
+              </motion.div>
+              
+              {/* Selector de Rol */}
+              <motion.div
+                {...(prefersReducedMotion ? {} : { variants: itemVariants })}
+                className="relative">
+                <label
+                  htmlFor="rol"
+                  className="block text-sm font-medium text-gray-700 mb-2">
+                  Rol
+                </label>
+                <div className="relative">
+                  <UserCog
+                    className={`absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 transition-colors duration-200 ${focusedField === "rol" ? "text-teal-500" : "text-gray-400"}`}
+                    aria-hidden="true" />
+                  <select
+                    id="rol"
+                    name="rol"
+                    value={rol}
+                    onChange={(e) => setRol(e.target.value)}
+                    onFocus={() => setFocusedField("rol")}
+                    onBlur={() => setFocusedField(null)}
+                    disabled={isLoading}
+                    className={`w-full pl-10 pr-4 py-3.5 rounded-xl border appearance-none cursor-pointer transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 border-gray-200 bg-gray-50`}
+                  >
                     <option value="paciente">Paciente</option>
                     <option value="medico">Médico</option>
                     <option value="recepcionista">Recepcionista</option>
                     <option value="administrador">Administrador</option>
                   </select>
-                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" style={{ color: CLINICITA_COLORS.textMuted }}>
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </div>
                 </div>
-              </div>
-
-              {/* Campo: Contraseña con toggle */}
-              <div>
-                <label htmlFor="clave" className="block text-sm font-medium mb-1.5" style={{ color: CLINICITA_COLORS.textDark }}>
-                  Contraseña
-                </label>
-                <div className="relative">
-                  <input type={showPassword ? 'text' : 'password'} id="clave" name="clave" required autoComplete="current-password" value={clave} onChange={(e) => setClave(e.target.value)} disabled={isLoading} className="w-full pl-4 pr-12 py-3 border rounded-lg text-base transition-all duration-200" style={{ backgroundColor: CLINICITA_COLORS.white, borderColor: '#E2E8F0', color: CLINICITA_COLORS.textDark, boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)' }} placeholder="••••••••" aria-describedby="clave-error" />
-                  <button type="button" onClick={handleTogglePassword} disabled={isLoading} className="absolute inset-y-0 right-0 flex items-center pr-3 text-sm transition-colors" style={{ color: CLINICITA_COLORS.textMuted }} aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'} aria-pressed={showPassword}>
-                    {showPassword ? (
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88a3 3 0 114.242-4.242M9.88 9.88L6 6m0 0l-1.5 1.5M6 6l12 12" />
-                      </svg>
-                    ) : (
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                      </svg>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {/* Checkbox: Recordar sesión */}
-              <div className="flex items-center">
-                <input type="checkbox" id="recordar" name="recordar" className="h-4 w-4 rounded border-gray-300 focus:ring-2 focus:ring-offset-0 transition-colors" style={{ borderColor: '#E2E8F0', accentColor: CLINICITA_COLORS.mid }} disabled={isLoading} />
-                <label htmlFor="recordar" className="ml-3 text-sm text-gray-600 cursor-pointer select-none" style={{ color: CLINICITA_COLORS.textMuted }}>
+              </motion.div>
+             
+              {/* Recordar sesión */}
+              <motion.div
+                {...(prefersReducedMotion ? {} : { variants: itemVariants })}
+                className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="recordar"
+                  name="recordar"
+                  className="h-4 w-4 rounded border-gray-300 focus:ring-2 focus:ring-teal-500 focus:ring-offset-2 accent-teal-600 transition-colors"
+                  disabled={isLoading}
+                />
+                <label
+                  htmlFor="recordar"
+                  className="ml-3 text-sm text-gray-600 cursor-pointer select-none">
                   Recordar sesión
                 </label>
-              </div>
-
-              {/* Botón submit */}
-              <button type="submit" disabled={isLoading} className="w-full py-3.5 rounded-lg font-semibold text-base text-white transition-all duration-200 flex items-center justify-center gap-2" style={{ backgroundColor: CLINICITA_COLORS.mid, boxShadow: '0 4px 12px rgba(46, 80, 144, 0.3)' }} aria-busy={isLoading}>
+              </motion.div>
+             
+              {/* Botón de envío */}
+              <motion.button
+                {...(prefersReducedMotion ? {} : { 
+                  whileHover: { scale: 1.01, boxShadow: "0 8px 25px rgba(13, 148, 136, 0.4)" },
+                  whileTap: { scale: 0.98 },
+                })}
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-3.5 pr-6 rounded-xl font-semibold text-base text-white transition-all duration-200 flex items-center justify-center justify-center gap-2 relative overflow-hidden"
+                style={{background: "linear-gradient(135deg, #0D9488 0%, #0A7A70 100%)", boxShadow: "0 4px 12px rgba(13, 148, 136, 0.3)"}}
+                aria-busy={isLoading}
+              >
                 {isLoading ? (
                   <>
                     <Loader className="h-5 w-5 animate-spin" aria-hidden="true" />
                     <span>Ingresando...</span>
                   </>
                 ) : (
-                  'Ingresar'
+                  "Ingresar"
                 )}
-              </button>
+                <motion.div
+                  className="absolute inset-0 bg-white/20"
+                  animate={{width: isLoading ? "100%" : 0}}
+                  transition={{duration: 0.3}}
+                />
+              </motion.button>
             </form>
-
-            {/* Enlaces inferiores */}
-            <div className="mt-6 text-center text-sm" style={{ color: CLINICITA_COLORS.textMuted }}>
-              <p className="mb-2">
-                <Link to="/recuperar" className="hover:underline transition-colors" style={{ color: CLINICITA_COLORS.mid }}>
-                  ¿Olvidaste tu contraseña?
-                </Link>
-              </p>
-              <p className="mb-0">
-                ¿No tienes cuenta?{' '}
-                <Link to="/registro" className="font-medium hover:underline transition-colors" style={{ color: CLINICITA_COLORS.mid }}>
-                  Regístrate
-                </Link>
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Footer pequeño con marca */}
-        <p className="text-center text-xs mt-6" style={{ color: CLINICITA_COLORS.textMuted }}>
-          © 2026 CliniCita — Equipo ADSO ATHENA LABS · SENA
-        </p>
-      </div>
-    </div>
-  );
-};
+         
+          {/* Enlaces inferiores */}
+          <motion.div
+            {...(prefersReducedMotion ? {} : { variants: itemVariants })}
+            className="mt-8 pt-6 border-t border-teal-100 text-center text-sm">
+            <p className="mb-3">
+              <Link
+                to="/recuperar"
+                className="text-teal-600 hover:text-teal-700 font-medium transition-colors">
+                ¿Olvidaste tu contraseña?
+              </Link>
+            </p>
+            <p className="mb-0">
+              ¿No tienes cuenta? {" "}
+              <Link
+                to="/registro"
+                className="text-teal-600 hover:text-teal-700 font-semibold transition-colors">
+                Crea una cuenta
+              </Link>
+            </p>
+          </motion.div>
+        <>
+          {/* Footer */}
+        <motion.p
+          {...(prefersReducedMotion ? {} : { variants: itemVariants })}
+          className="text-center text-xs mt-8 text-gray-400">
+          © 2026 Clinicita — Equipo ADSO ATHENA LABS · SENA
+        </motion.p>
+        </>
+    </motion.div>
+  </div>
+);
+  };
 
 export default LoginPage;

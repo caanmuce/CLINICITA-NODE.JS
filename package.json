@@ -32,7 +32,7 @@
   },
   "devDependencies": {
     "eslint": "^10.13.0",
-    "prettier": "^3.9.10"
+    "prettier": "^3.10.1"
   },
   "allowScripts": {
     "node@26.8.2": true,

@@ -1,24 +1,29 @@
 // src/components/layout/Header.jsx
 
-import React, { useState, useRef, useEffect } from 'react';
-import { useAuth } from '../../context/AuthContext';
-import { Menu, Bell, User, ChevronDown, LogOut, Settings } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useRef, useEffect } from "react";
+import { useAuth } from "../../context/AuthContext";
+import { Menu, Bell, User, ChevronDown, LogOut, Settings } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 
 export const Header = ({ onMenuClick }) => {
   const { user } = useAuth();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const dropdownRef = useRef(null);
+  const notificationsRef = useRef(null);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setIsDropdownOpen(false);
       }
+      if (notificationsRef.current && !notificationsRef.current.contains(event.target)) {
+        setIsNotificationsOpen(false);
+      }
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   return (
@@ -41,21 +46,36 @@ export const Header = ({ onMenuClick }) => {
       <div className="flex items-center gap-4">
         {/* Notifications */}
         <motion.button
+          onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
           className="relative p-2 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
           aria-label="Notificaciones"
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.9 }}
         >
           <Bell className="h-5 w-5" />
-          <motion.span
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            className="absolute top-1 right-1 h-4 w-4 bg-red-500 text-white text-xs rounded-full flex items-center justify-center"
-            transition={{ type: 'spring', stiffness: 260, damping: 20 }}
-          >
-            3
-          </motion.span>
         </motion.button>
+
+        {/* Notifications panel */}
+        <AnimatePresence>
+          {isNotificationsOpen && (
+            <motion.div
+              ref={notificationsRef}
+              initial={{ opacity: 0, y: -10, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -10, scale: 0.95 }}
+              transition={{ duration: 0.15, ease: "easeOut" }}
+              className="absolute top-16 right-0 w-64 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50"
+            >
+              <div className="px-4 py-3 border-b border-gray-200">
+                <h3 className="text-sm font-medium text-gray-900">Notificaciones</h3>
+                <p className="text-xs text-gray-500">Sin notificaciones pendientes</p>
+              </div>
+              <div className="px-4 py-3 text-center text-gray-500 text-sm">
+                No hay notificaciones disponibles en este momento.
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* User dropdown */}
         <div className="relative" ref={dropdownRef}>
@@ -67,10 +87,12 @@ export const Header = ({ onMenuClick }) => {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
-            <div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center">
-              <User className="h-5 w-5 text-indigo-600" />
+            <div className="h-8 w-8 rounded-full bg-teal-100 flex items-center justify-center">
+              <User className="h-5 w-5 text-teal-600" />
             </div>
-            <span className="hidden sm:block text-sm font-medium text-gray-700">{user?.nombre}</span>
+            <span className="hidden sm:block text-sm font-medium text-gray-700">
+              {user?.nombre}
+            </span>
             <motion.div
               animate={{ rotate: isDropdownOpen ? 180 : 0 }}
               transition={{ duration: 0.2 }}
@@ -79,7 +101,7 @@ export const Header = ({ onMenuClick }) => {
               <ChevronDown />
             </motion.div>
           </motion.button>
-          
+
           {/* Dropdown menu */}
           <AnimatePresence>
             {isDropdownOpen && (
@@ -87,11 +109,13 @@ export const Header = ({ onMenuClick }) => {
                 initial={{ opacity: 0, y: -10, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                transition={{ duration: 0.15, ease: 'easeOut' }}
+                transition={{ duration: 0.15, ease: "easeOut" }}
                 className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50"
               >
                 <div className="px-4 py-2 border-b border-gray-200">
-                  <p className="text-sm font-medium text-gray-900">{user?.nombre}</p>
+                  <p className="text-sm font-medium text-gray-900">
+                    {user?.nombre}
+                  </p>
                   <p className="text-xs text-gray-500">{user?.correo}</p>
                 </div>
                 <motion.button

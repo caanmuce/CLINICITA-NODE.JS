@@ -1,15 +1,15 @@
-import apiClient from './apiClient';
+import apiClient from "./apiClient";
 
 export const listaEsperaApi = {
   // GET /api/lista-espera (Recep/Admin listar)
   listarAdmin: async (params = {}) => {
-    const response = await apiClient.get('/lista-espera', { params });
+    const response = await apiClient.get("/lista-espera", { params });
     return response.data;
   },
 
   // POST /api/lista-espera (Recep/Admin inscribir paciente)
   crearAdmin: async (data) => {
-    const response = await apiClient.post('/lista-espera', data);
+    const response = await apiClient.post("/lista-espera", data);
     return response.data;
   },
 
@@ -29,15 +29,15 @@ export const listaEsperaApi = {
   // Backend devuelve: { lista_espera: [{ espera_id, especialidad_requerida, sede, prioridad, fecha_inscripcion, posicion }, ...] }
   // Frontend espera: [{ id, especialidad_nombre, prioridad, estado, motivo, fecha_inscripcion, posicion }, ...]
   listarMiLista: async () => {
-    const response = await apiClient.get('/lista-espera/me');
+    const response = await apiClient.get("/lista-espera/me");
     const lista = response.data.lista_espera || [];
     // Transformar campos del backend al formato que espera el frontend
-    return lista.map(item => ({
+    return lista.map((item) => ({
       id: item.espera_id,
       especialidad_nombre: item.especialidad_requerida,
       sede_nombre: item.sede,
       prioridad: item.prioridad, // Backend: 'Alta', 'Media', 'Baja'
-      estado: 'Activo', // Backend solo devuelve 'Activo', mapear a 'pendiente' para el frontend
+      estado: "Activo", // Backend solo devuelve 'Activo', mapear a 'pendiente' para el frontend
       motivo: null,
       fecha_inscripcion: item.fecha_inscripcion,
       posicion: item.posicion,
@@ -46,13 +46,13 @@ export const listaEsperaApi = {
 
   // POST /api/lista-espera/me (Paciente se inscribe)
   inscribirme: async (data) => {
-    const response = await apiClient.post('/lista-espera/me', data);
+    const response = await apiClient.post("/lista-espera/me", data);
     return response.data;
   },
 
   // GET /api/lista-espera/me/count (KPI paciente)
   contarMiLista: async () => {
-    const response = await apiClient.get('/lista-espera/me/count');
+    const response = await apiClient.get("/lista-espera/me/count");
     return response.data;
   },
 

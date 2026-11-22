@@ -1,35 +1,147 @@
-// src/pages/admin/Medicos.jsx - PENDIENTE: Implementar funcionalidad completa
-
-import React from 'react';
-import { Stethoscope, UserPlus, Search, AlertCircle } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from "react";
+import { Stethoscope, UserPlus, Search, AlertCircle, Loader2 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { medicosApi } from "../../api/medicos";
 
 export const AdminMedicos = () => {
+  const [medicos, setMedicos] = useState([]);
+  const [especialidadFilter, setEspecialidadFilter] = useState("");
+  const [especialidades, setEspecialidades] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const cargarMedicos = useCallback(async (especialidad) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await medicosApi.listar(especialidad || undefined);
+      setMedicos(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error("Error cargando medicos:", e);
+      setError("No se pudieron cargar los medicos");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const cargarEspecialidades = useCallback(async () => {
+    try {
+      const data = await medicosApi.listarEspecialidades();
+      setEspecialidades(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error("Error cargando especialidades:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    cargarEspecialidades();
+    cargarMedicos(especialidadFilter);
+  }, [especialidadFilter, cargarEspecialidades, cargarMedicos]);
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-teal-600 mb-4" />
+        <p className="text-gray-500">Cargando medicos...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Gestión de Médicos</h1>
-          <p className="text-gray-500 mt-1">Plantilla médica, especialidades y asignación a sedes</p>
+          <h1 className="text-2xl font-bold text-gray-900">Gestion de Medicos</h1>
+          <p className="text-gray-500 mt-1">
+            Plantilla medica, especialidades y asignacion a sedes
+          </p>
         </div>
-        <Link to="/admin/medicos/nuevo" className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors">
+        <Link
+          to="/admin/medicos/nuevo"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 transition-colors"
+        >
           <UserPlus className="h-5 w-5" />
-          Nuevo médico
+          Nuevo medico
         </Link>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-4">
         <div className="flex flex-col sm:flex-row gap-4">
-          <div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" /><input type="text" placeholder="Buscar médico, especialidad..." className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" /></div>
-          <select className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"><option>Todas las especialidades</option><option>Cardiología</option><option>Dermatología</option></select>
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Buscar medico, especialidad..."
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+            />
+          </div>
+          <select
+            value={especialidadFilter}
+            onChange={(e) => setEspecialidadFilter(e.target.value)}
+            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+          >
+            <option value="">Todas las especialidades</option>
+            {especialidades.map((esp) => (
+              <option key={esp.nombre || esp.id} value={esp.nombre || esp.id}>
+                {esp.nombre || esp.especialidad_nombre || esp.id}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200">
-        <div className="overflow-x-auto"><table className="w-full"><thead className="bg-gray-50"><tr><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Médico</th><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Especialidad</th><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">CMP</th><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sedes</th><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acciones</th></tr></thead><tbody className="divide-y divide-gray-200"><tr><td colSpan="6" className="px-4 py-12 text-center text-gray-500"><Stethoscope className="h-12 w-12 mx-auto text-gray-300 mb-3" /><p>No hay médicos registrados</p></td></tr></tbody></table></div>
-      </div>
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <AlertCircle className="h-5 w-5 text-red-600" />
+          <span className="text-red-800 text-sm ml-2">{error}</span>
+        </div>
+      )}
 
-      <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4"><h3 className="font-medium text-yellow-900 mb-2 flex items-center gap-2"><AlertCircle className="h-5 w-5" /> Página en desarrollo</h3><p className="text-sm text-yellow-700">Pendientes: GET /api/admin/medicos, POST /api/admin/medicos (usuario_id, especialidad, cmp, sedes[]), PUT /api/admin/medicos/:id, GET /api/especialidades, GET /api/sedes</p></div>
+      <div className="bg-white rounded-xl border border-gray-200">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Medico</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Especialidad</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">CMP</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sede</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {medicos.length === 0 ? (
+                <tr>
+                  <td colSpan="6" className="px-4 py-12 text-center text-gray-500">
+                    <Stethoscope className="h-12 w-12 mx-auto text-gray-300 mb-3" />
+                    <p>No hay medicos registrados</p>
+                  </td>
+                </tr>
+              ) : (
+                medicos.map((m) => (
+                  <tr key={m.id || m.medico_id} className="hover:bg-gray-50">
+                    <td className="px-4 py-4 text-gray-900 font-medium">
+                      {m.nombre_completo || m.nombre || "\u2014"}
+                    </td>
+                    <td className="px-4 py-4 text-gray-600">
+                      {m.especialidad_nombre || m.especialidad || "\u2014"}
+                    </td>
+                    <td className="px-4 py-4 text-gray-600">{m.cmp || "\u2014"}</td>
+                    <td className="px-4 py-4 text-gray-600">{m.sede_nombre || "\u2014"}</td>
+                    <td className="px-4 py-4 text-gray-600">{m.estado || "Activo"}</td>
+                    <td className="px-4 py-4">
+                      <span className="text-xs text-gray-400">Sin acción</span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 };
+
+export default AdminMedicos;

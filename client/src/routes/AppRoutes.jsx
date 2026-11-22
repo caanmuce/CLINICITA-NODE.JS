@@ -1,83 +1,89 @@
 // src/routes/AppRoutes.jsx
 
-import React, { Suspense, lazy } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import { ProtectedRoute } from '../components/layout/ProtectedRoute';
-import { RoleLayout } from '../components/layout/RoleLayout';
-import LoginPage from '../pages/LoginPage';
-import RegisterPage from '../pages/auth/RegisterPage';
-import RecuperarPage from '../pages/auth/RecuperarPage';
-import PrivacidadPage from '../pages/auth/PrivacidadPage';
-import TerminosPage from '../pages/auth/TerminosPage';
-import AyudaPage from '../pages/auth/AyudaPage';
-import ContactoPage from '../pages/auth/ContactoPage';
+import React, { Suspense, lazy } from "react";
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate,
+} from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import { ProtectedRoute } from "../components/layout/ProtectedRoute";
+import { RoleLayout } from "../components/layout/RoleLayout";
+import LoginPage from "../pages/LoginPage";
+import RegisterPage from "../pages/auth/RegisterPage";
+import RecuperarPage from "../pages/auth/RecuperarPage";
+import PrivacidadPage from "../pages/auth/PrivacidadPage";
+import TerminosPage from "../pages/auth/TerminosPage";
+import AyudaPage from "../pages/auth/AyudaPage";
+import ContactoPage, { LandingPage } from "../pages/auth/ContactoPage";
 
 // Lazy-loaded page components
-const PacienteDashboard = lazy(() => import('../pages/paciente/Dashboard').then(m => ({ default: m.PacienteDashboard })));
-const PacienteCitas = lazy(() => import('../pages/paciente/Citas').then(m => ({ default: m.PacienteCitas })));
-const PacienteAgendarCita = lazy(() => import('../pages/paciente/AgendarCita').then(m => ({ default: m.PacienteAgendarCita })));
-const PacienteListaEspera = lazy(() => import('../pages/paciente/ListaEspera').then(m => ({ default: m.PacienteListaEspera })));
-const PacientePreconsulta = lazy(() => import('../pages/paciente/Preconsulta').then(m => ({ default: m.PacientePreconsulta })));
-const PacientePerfil = lazy(() => import('../pages/paciente/Perfil').then(m => ({ default: m.PacientePerfil })));
-
-const MedicoDashboard = lazy(() => import('../pages/medico/Dashboard').then(m => ({ default: m.MedicoDashboard })));
-const MedicoAgenda = lazy(() => import('../pages/medico/Agenda').then(m => ({ default: m.MedicoAgenda })));
-const MedicoCitas = lazy(() => import('../pages/medico/Citas').then(m => ({ default: m.MedicoCitas })));
-const MedicoPacientes = lazy(() => import('../pages/medico/Pacientes').then(m => ({ default: m.MedicoPacientes })));
-
-const RecepcionistaDashboard = lazy(() => import('../pages/recepcionista/Dashboard').then(m => ({ default: m.RecepcionistaDashboard })));
-const RecepcionistaCitas = lazy(() => import('../pages/recepcionista/Citas').then(m => ({ default: m.RecepcionistaCitas })));
-const RecepcionistaPacientes = lazy(() => import('../pages/recepcionista/Pacientes').then(m => ({ default: m.RecepcionistaPacientes })));
-const RecepcionistaHorarios = lazy(() => import('../pages/recepcionista/Horarios').then(m => ({ default: m.RecepcionistaHorarios })));
-
-const AdminDashboard = lazy(() => import('../pages/admin/Dashboard').then(m => ({ default: m.AdminDashboard })));
-const AdminUsuarios = lazy(() => import('../pages/admin/Usuarios').then(m => ({ default: m.AdminUsuarios })));
-const AdminMedicos = lazy(() => import('../pages/admin/Medicos').then(m => ({ default: m.AdminMedicos })));
-const AdminSedes = lazy(() => import('../pages/admin/Sedes').then(m => ({ default: m.AdminSedes })));
-const AdminReportes = lazy(() => import('../pages/admin/Reportes').then(m => ({ default: m.AdminReportes })));
-
-// Loading fallback
-const PageLoading = () => (
-  <div className="flex items-center justify-center min-h-[400px]">
-    <div className="animate-spin rounded-full h-12 w-12 border-4 border-indigo-600 border-t-transparent" />
-  </div>
+const PacienteDashboard = lazy(() =>
+  import("../pages/paciente/Dashboard").then((m) => m.PacienteDashboard),
+);
+const PacienteCitas = lazy(() =>
+  import("../pages/paciente/Citas").then((m) => m.PacienteCitas),
+);
+const PacienteAgendarCita = lazy(() =>
+  import("../pages/paciente/AgendarCita").then((m) => m.PacienteAgendarCita),
+);
+const PacienteListaEspera = lazy(() =>
+  import("../pages/paciente/ListaEspera").then((m) => m.PacienteListaEspera),
+);
+const PacientePreconsulta = lazy(() =>
+  import("../pages/paciente/Preconsulta").then((m) => m.PacientePreconsulta),
+);
+const PacientePerfil = lazy(() =>
+  import("../pages/paciente/Perfil").then((m) => m.PacientePerfil),
+);
+const MedicoDashboard = lazy(() =>
+  import("../pages/medico/Dashboard").then((m) => m.MedicoDashboard),
+);
+const MedicoAgenda = lazy(() =>
+  import("../pages/medico/Agenda").then((m) => m.MedicoAgenda),
+);
+const MedicoCitas = lazy(() =>
+  import("../pages/medico/Citas").then((m) => m.MedicoCitas),
+);
+const MedicoPacientes = lazy(() =>
+  import("../pages/medico/Pacientes").then((m) => m.MedicoPacientes),
+);
+const RecepcionistaDashboard = lazy(() =>
+  import("../pages/recepcionista/Dashboard").then((m) => m.RecepcionistaDashboard),
+);
+const RecepcionistaCitas = lazy(() =>
+  import("../pages/recepcionista/Citas").then((m) => m.RecepcionistaCitas),
+);
+const RecepcionistaPacientes = lazy(() =>
+  import("../pages/recepcionista/Pacientes").then((m) => m.RecepcionistaPacientes),
+);
+const RecepcionistaHorarios = lazy(() =>
+  import("../pages/recepcionista/Horarios").then((m) => m.RecepcionistaHorarios),
 );
 
-const WithLayout = ({ children }) => (
-  <Suspense fallback={<PageLoading />}>
-    <RoleLayout>{children}</RoleLayout>
-  </Suspense>
+const AdminDashboard = lazy(() =>
+  import("../pages/admin/Dashboard").then((m) => m.AdminDashboard),
 );
-
-const AppRoutes = () => {
-  const { isAuthenticated, user, loading } = useAuth();
-
-  if (loading) {
-    return (
-      <Router>
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-4 border-indigo-600 border-t-transparent" />
-        </div>
-      </Router>
-    );
-  }
-
-  const getDefaultRoute = () => {
-    if (!isAuthenticated) return '/login';
-    const role = user?.rol?.toLowerCase();
-    const routes = {
-      paciente: '/paciente',
-      medico: '/medico',
-      recepcionista: '/recepcionista',
-      administrador: '/admin',
-    };
-    return routes[role] || '/login';
-  };
+const AdminUsuarios = lazy(() =>
+  import("../pages/admin/Usuarios").then((m) => m.AdminUsuarios),
+);
+const AdminMedicos = lazy(() =>
+  import("../pages/admin/Medicos").then((m) => m.AdminMedicos),
+);
+const AdminSedes = lazy(() =>
+  import("../pages/admin/Sedes").then((m) => m.AdminSedes),
+);
+const AdminReportes = lazy(() =>
+  import("../pages/admin/Reportes").then((m) => m.AdminReportes),
+);
+function AppRoutes() {
+  const { user, loading, isAuthenticated } = useAuth();
 
   return (
     <Router>
       <Routes>
+        <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/registro" element={<RegisterPage />} />
         <Route path="/recuperar" element={<RecuperarPage />} />
@@ -85,13 +91,12 @@ const AppRoutes = () => {
         <Route path="/terminos" element={<TerminosPage />} />
         <Route path="/ayuda" element={<AyudaPage />} />
         <Route path="/contacto" element={<ContactoPage />} />
-        <Route path="/" element={<Navigate to={getDefaultRoute()} replace />} />
-        
+
         {/* PACIENTE routes */}
         <Route
           element={
-            <ProtectedRoute allowedRoles={['paciente']}>
-              <WithLayout />
+            <ProtectedRoute allowedRoles={["paciente"]}>
+              <RoleLayout />
             </ProtectedRoute>
           }
         >
@@ -104,11 +109,11 @@ const AppRoutes = () => {
           <Route path="paciente/perfil" element={<PacientePerfil />} />
         </Route>
 
-        {/* MÉDICO routes */}
+        {/* MEDICO routes */}
         <Route
           element={
-            <ProtectedRoute allowedRoles={['medico']}>
-              <WithLayout />
+            <ProtectedRoute allowedRoles={["medico"]}>
+              <RoleLayout />
             </ProtectedRoute>
           }
         >
@@ -122,8 +127,8 @@ const AppRoutes = () => {
         {/* RECEPCIONISTA routes */}
         <Route
           element={
-            <ProtectedRoute allowedRoles={['recepcionista']}>
-              <WithLayout />
+            <ProtectedRoute allowedRoles={["recepcionista"]}>
+              <RoleLayout />
             </ProtectedRoute>
           }
         >
@@ -137,8 +142,8 @@ const AppRoutes = () => {
         {/* ADMINISTRADOR routes */}
         <Route
           element={
-            <ProtectedRoute allowedRoles={['administrador']}>
-              <WithLayout />
+            <ProtectedRoute allowedRoles={["administrador"]}>
+              <RoleLayout />
             </ProtectedRoute>
           }
         >
@@ -150,10 +155,10 @@ const AppRoutes = () => {
           <Route path="admin/reportes" element={<AdminReportes />} />
         </Route>
 
-        <Route path="*" element={<Navigate to={getDefaultRoute()} replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Router>
   );
-};
+}
 
 export default AppRoutes;

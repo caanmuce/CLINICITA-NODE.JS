@@ -1,8 +1,8 @@
 // src/hooks/usePageTransition.js
 // Hook personalizado para transiciones de página suaves
 
-import { useEffect, useState, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useEffect, useState, useRef } from "react";
+import { useLocation } from "react-router-dom";
 
 export const usePageTransition = (duration = 300) => {
   const location = useLocation();
@@ -17,10 +17,10 @@ export const usePageTransition = (duration = 300) => {
       isFirstRender.current = false;
       return;
     }
-    
+
     setIsTransitioning(true);
-    setTransitionKey(k => k + 1);
-    
+    setTransitionKey((k) => k + 1);
+
     timerRef.current = setTimeout(() => {
       setIsTransitioning(false);
     }, duration);

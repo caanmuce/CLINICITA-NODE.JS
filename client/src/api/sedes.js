@@ -1,15 +1,16 @@
-import apiClient from './apiClient';
+import apiClient from "./apiClient";
 
 export const sedesApi = {
   // GET /api/sedes (Listar sedes activas)
+  // Backend devuelve: { sedes: [...] }
   listar: async () => {
-    const response = await apiClient.get('/sedes');
-    return response.data;
+    const response = await apiClient.get("/sedes");
+    return response.data.sedes || [];
   },
 
   // POST /api/sedes (Crear sede - Admin)
   crear: async (data) => {
-    const response = await apiClient.post('/sedes', data);
+    const response = await apiClient.post("/sedes", data);
     return response.data;
   },
 

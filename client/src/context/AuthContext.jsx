@@ -1,13 +1,13 @@
 // src/context/AuthContext.jsx
 
-import React, { createContext, useState, useEffect, useContext } from 'react';
-import apiClient from '../api/apiClient';
+import React, { createContext, useState, useEffect, useContext } from "react";
+import apiClient from "../api/apiClient";
 
 const AuthContext = createContext();
 
 // Clave única de localStorage para el token (unificada)
-const TOKEN_KEY = 'authToken';
-const USER_KEY = 'clinicita_usuario';
+const TOKEN_KEY = "authToken";
+const USER_KEY = "clinicita_usuario";
 
 // Mapea la respuesta de /api/usuarios/me al formato que espera el frontend
 // Backend retorna: { usuario: { usuario_id, nombre_completo, correo, rol, paciente_id, medico_id, ... } }
@@ -44,14 +44,14 @@ export const AuthProvider = ({ children }) => {
   // Útil después de editar perfil para actualizar el estado global
   const refreshUser = async () => {
     try {
-      const response = await apiClient.get('/usuarios/me');
+      const response = await apiClient.get("/usuarios/me");
       const backendUser = response.data.usuario;
       const userData = mapUserFromBackend(backendUser);
       setUser(userData);
       localStorage.setItem(USER_KEY, JSON.stringify(userData));
       return userData;
     } catch (error) {
-      console.error('Error refrescando usuario:', error);
+      console.error("Error refrescando usuario:", error);
       // Si falla (ej. 401), limpiar auth
       clearAuthData();
       setUser(null);
@@ -66,7 +66,7 @@ export const AuthProvider = ({ children }) => {
     if (token) {
       const checkAuth = async () => {
         try {
-          const response = await apiClient.get('/usuarios/me');
+          const response = await apiClient.get("/usuarios/me");
           const backendUser = response.data.usuario;
           const userData = mapUserFromBackend(backendUser);
           setUser(userData);
@@ -76,7 +76,7 @@ export const AuthProvider = ({ children }) => {
             localStorage.setItem(USER_KEY, JSON.stringify(userData));
           }
         } catch (error) {
-          console.error('Authentication failed:', error);
+          console.error("Authentication failed:", error);
           clearAuthData();
           setIsAuthenticated(false);
           setUser(null);
@@ -101,11 +101,13 @@ export const AuthProvider = ({ children }) => {
     clearAuthData();
     setUser(null);
     setIsAuthenticated(false);
-    window.location.href = '/login';
+    window.location.href = "/login";
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, user, loading, login, logout, refreshUser }}>
+    <AuthContext.Provider
+      value={{ isAuthenticated, user, loading, login, logout, refreshUser }}
+    >
       {children}
     </AuthContext.Provider>
   );
