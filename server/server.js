@@ -1,23 +1,38 @@
 console.log("=== SERVER.JS LOADING FROM:", __filename, "===");
 const express = require("express");
 const path = require("path");
-require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
+require("dotenv").config({
+    path: path.join(__dirname, "..", ".env"),
+    override: process.env.NODE_ENV !== "production"
+});
 const conexion = require("./conexion");
 const crypto = require("crypto");
 const { promisify } = require("util");
 const { iniciarWhatsApp } = require("./servicios/whatsapp");
-const { reasignarCupoListaEspera } = require("./servicios/espera");
+const { reasignarCupoListaEspera, responderOfertaListaEspera, expirarOfertasListaEspera } = require("./servicios/espera");
+const cron = require("node-cron");
+let whatsappClient = null;
 const { z } = require("zod");
 const helmet = require("helmet");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 const { mlClient } = require("./services/ml-client");
+// Módulos de Administración y Médico aportados por juan-nuevo.
+const { migrar } = require("./rutas/migraciones");
+const { registrarRutasAdmin } = require("./rutas/admin");
+const { calcularHorariosLibres } = require("./rutas/horarios");
+const { hoyClinica, esFechaValida } = require("./rutas/utilidades");
 
 const app = express();
 const query = promisify(conexion.query).bind(conexion);
 const ROLES = ["paciente", "medico", "recepcionista", "administrador"];
 const TOKEN_SECRET = process.env.TOKEN_SECRET || "clinicita-clave-local-cambiar-en-produccion";
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "http://localhost:8000";
+const DEVELOPER_MODE = process.env.NODE_ENV !== "production" && process.env.DEVELOPER_MODE === "true";
+
+if (DEVELOPER_MODE) {
+    console.warn("⚠️ DEVELOPER_MODE activo: los médicos podrán recibir citas a cualquier hora.");
+}
 
 // Validar TOKEN_SECRET en producción
 if (process.env.NODE_ENV === "production" && (!process.env.TOKEN_SECRET || process.env.TOKEN_SECRET === "clinicita-clave-local-cambiar-en-produccion")) {
@@ -229,6 +244,16 @@ async function initializeAuth() {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
     await query(`
+        CREATE TABLE IF NOT EXISTS whatsapp_sesiones (
+            chat_id VARCHAR(255) NOT NULL PRIMARY KEY,
+            tipo ENUM('conversacion', 'autorizacion') NOT NULL,
+            payload JSON NOT NULL,
+            expira_en DATETIME NOT NULL,
+            actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            KEY idx_whatsapp_sesiones_expira (expira_en)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    await query(`
         CREATE TABLE IF NOT EXISTS recordatorios (
             recordatorio_id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
             cita_id INT NOT NULL,
@@ -245,6 +270,110 @@ async function initializeAuth() {
     await query(`
         ALTER TABLE recordatorios MODIFY canal_envio ENUM('WhatsApp', 'SMS', 'Email', 'WhatsApp+SMS') DEFAULT 'WhatsApp'
     `).catch(() => {}); // Ignorar error si ya existe
+
+    // Migración incremental de lista de espera.
+    await query("ALTER TABLE lista_espera MODIFY estado_espera ENUM('Activo','Ofertado','Asignado','Expirado','Cancelado') DEFAULT 'Activo'");
+    const columnasEspera = [
+        ["medico_preferido_id", "INT NULL AFTER sede_id"],
+        ["fecha_desde", "DATE NULL AFTER medico_preferido_id"],
+        ["fecha_hasta", "DATE NULL AFTER fecha_desde"],
+        ["franja_horaria", "ENUM('Manana','Tarde','Cualquiera') NOT NULL DEFAULT 'Cualquiera' AFTER fecha_hasta"]
+    ];
+    for (const [columna, definicion] of columnasEspera) {
+        const existe = await query(`
+            SELECT COLUMN_NAME FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'lista_espera' AND COLUMN_NAME = ?
+        `, [columna]);
+        if (!existe.length) await query(`ALTER TABLE lista_espera ADD COLUMN ${columna} ${definicion}`);
+    }
+    const fkMedicoEspera = await query(`
+        SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'lista_espera'
+          AND CONSTRAINT_NAME = 'fk_lista_espera_medico_preferido'
+    `);
+    if (!fkMedicoEspera.length) {
+        await query(`ALTER TABLE lista_espera
+            ADD CONSTRAINT fk_lista_espera_medico_preferido
+            FOREIGN KEY (medico_preferido_id) REFERENCES medicos(medico_id)
+            ON DELETE SET NULL ON UPDATE CASCADE`);
+    }
+    await query(`
+        CREATE TABLE IF NOT EXISTS lista_espera_ofertas (
+            oferta_id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            espera_id INT NOT NULL,
+            paciente_id INT NOT NULL,
+            medico_id INT NOT NULL,
+            sede_id INT NULL,
+            fecha_cita DATE NOT NULL,
+            hora_cita TIME NOT NULL,
+            especialidad VARCHAR(50) NOT NULL,
+            estado ENUM('Pendiente','Aceptada','Rechazada','Expirada','Cancelada') NOT NULL DEFAULT 'Pendiente',
+            fecha_oferta DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            vence_en DATETIME NOT NULL,
+            fecha_respuesta DATETIME NULL,
+            cita_id INT NULL,
+            slot_reservado VARCHAR(80) GENERATED ALWAYS AS
+                (CASE WHEN estado = 'Pendiente' THEN CONCAT(medico_id, '|', fecha_cita, '|', hora_cita) ELSE NULL END) STORED,
+            espera_activa INT GENERATED ALWAYS AS
+                (CASE WHEN estado = 'Pendiente' THEN espera_id ELSE NULL END) STORED,
+            UNIQUE KEY uq_lista_espera_slot_activo (slot_reservado),
+            UNIQUE KEY uq_lista_espera_paciente_ofertado (espera_activa),
+            KEY idx_lista_espera_ofertas_vencimiento (estado, vence_en),
+            KEY idx_lista_espera_ofertas_paciente (paciente_id, estado),
+            CONSTRAINT fk_espera_oferta_espera FOREIGN KEY (espera_id) REFERENCES lista_espera(espera_id),
+            CONSTRAINT fk_espera_oferta_paciente FOREIGN KEY (paciente_id) REFERENCES pacientes(paciente_id) ON DELETE CASCADE,
+            CONSTRAINT fk_espera_oferta_medico FOREIGN KEY (medico_id) REFERENCES medicos(medico_id) ON DELETE RESTRICT,
+            CONSTRAINT fk_espera_oferta_sede FOREIGN KEY (sede_id) REFERENCES sedes(sede_id) ON DELETE SET NULL,
+            CONSTRAINT fk_espera_oferta_cita FOREIGN KEY (cita_id) REFERENCES citas(cita_id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    // Este trigger antiguo cerraba TODAS las inscripciones de un paciente al completar cualquier cita.
+    await query("DROP TRIGGER IF EXISTS trg_actualizar_lista_espera").catch((error) => {
+        console.warn("No se pudo retirar trg_actualizar_lista_espera:", error.message);
+    });
+    await query("DROP TRIGGER IF EXISTS trg_bloquear_cita_sobre_oferta").catch(() => {});
+    await query(`
+        CREATE TRIGGER trg_bloquear_cita_sobre_oferta
+        BEFORE INSERT ON citas
+        FOR EACH ROW
+        BEGIN
+            IF NEW.estado NOT IN ('Cancelada', 'No-Asistio') AND EXISTS (
+                SELECT 1 FROM lista_espera_ofertas o
+                WHERE o.medico_id = NEW.medico_id
+                  AND o.fecha_cita = NEW.fecha_cita
+                  AND o.hora_cita = NEW.hora_cita
+                  AND o.estado = 'Pendiente' AND o.vence_en > NOW()
+            ) THEN
+                SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Horario reservado temporalmente por una oferta de lista de espera';
+            END IF;
+        END
+    `).catch((error) => {
+        console.warn("No se pudo crear el trigger de protección de ofertas:", error.message);
+    });
+    await query("DROP TRIGGER IF EXISTS trg_bloquear_actualizacion_cita_sobre_oferta").catch(() => {});
+    await query(`
+        CREATE TRIGGER trg_bloquear_actualizacion_cita_sobre_oferta
+        BEFORE UPDATE ON citas
+        FOR EACH ROW
+        BEGIN
+            IF NEW.estado NOT IN ('Cancelada', 'No-Asistio')
+               AND (OLD.estado IN ('Cancelada', 'No-Asistio')
+                    OR NEW.medico_id <> OLD.medico_id
+                    OR NEW.fecha_cita <> OLD.fecha_cita
+                    OR NEW.hora_cita <> OLD.hora_cita)
+               AND EXISTS (
+                    SELECT 1 FROM lista_espera_ofertas o
+                    WHERE o.medico_id = NEW.medico_id
+                      AND o.fecha_cita = NEW.fecha_cita
+                      AND o.hora_cita = NEW.hora_cita
+                      AND o.estado = 'Pendiente' AND o.vence_en > NOW()
+               ) THEN
+                SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Horario reservado temporalmente por una oferta de lista de espera';
+            END IF;
+        END
+    `).catch((error) => {
+        console.warn("No se pudo crear el trigger de protección de actualizaciones:", error.message);
+    });
 
     const demoUsers = [
         ["Paciente Demo", "paciente@clinicita.com", "paciente123", "paciente"],
@@ -367,6 +496,9 @@ app.use("/api", apiLimiter, (req, res, next) => {
     next();
 });
 
+// Registro de rutas administrativas aisladas.
+registrarRutasAdmin(app, { query, requireAuth, requireRole, hashPassword });
+
 // Aplicar rate limiting estricto a endpoints de autenticación
 app.post("/api/auth/login", authLimiter);
 app.post("/api/auth/registro", authLimiter);
@@ -451,28 +583,37 @@ app.get("/api/medicos", requireAuth, requireRole("paciente", "recepcionista", "a
 });
 
 app.get("/api/horarios", requireAuth, requireRole("paciente", "recepcionista", "administrador"), async (req, res) => {
-    const { medico, fecha } = req.query;
+    const { medico, fecha, sede } = req.query;
     if (!medico || !/^\d{4}-\d{2}-\d{2}$/.test(String(fecha || "")) || Number.isNaN(Date.parse(fecha))) {
         return res.status(400).json({ mensaje: "Médico y fecha son obligatorios" });
     }
 
     try {
-        const franjas = await query(
-            `SELECT TIME_FORMAT(hora_inicio, '%H:%i') AS inicio,
-                    TIME_FORMAT(hora_fin, '%H:%i') AS fin,
-                    duracion_slot
-             FROM horarios
-             WHERE medico_id = ? AND activo = 1 AND dia_semana = DAYOFWEEK(?) - 1
-             ORDER BY hora_inicio`,
-            [medico, fecha]
-        );
+        const franjas = DEVELOPER_MODE
+            ? [{ inicio: "00:00", fin: "24:00", duracion_slot: 1 }]
+            : await query(
+                `SELECT TIME_FORMAT(hora_inicio, '%H:%i') AS inicio,
+                        TIME_FORMAT(hora_fin, '%H:%i') AS fin,
+                        duracion_slot
+                 FROM horarios
+                 WHERE medico_id = ? AND activo = 1 AND dia_semana = DAYOFWEEK(?) - 1
+                   AND (? IS NULL OR sede_id = ?)
+                 ORDER BY hora_inicio`,
+                [medico, fecha, sede ? Number(sede) : null, sede ? Number(sede) : null]
+            );
         const ocupadas = await query(
             `SELECT TIME_FORMAT(hora_cita, '%H:%i') AS hora
              FROM citas
              WHERE medico_id = ? AND fecha_cita = ? AND estado NOT IN ('Cancelada', 'No-Asistio')`,
             [medico, fecha]
         );
-        const ocupadasSet = new Set(ocupadas.map((c) => c.hora));
+        const ofertasActivas = await query(
+            `SELECT TIME_FORMAT(hora_cita, '%H:%i') AS hora
+             FROM lista_espera_ofertas
+             WHERE medico_id = ? AND fecha_cita = ? AND estado = 'Pendiente' AND vence_en > NOW()`,
+            [medico, fecha]
+        );
+        const ocupadasSet = new Set([...ocupadas, ...ofertasActivas].map((c) => c.hora));
 
         const offset = process.env.CLINIC_UTC_OFFSET || "-05:00";
         const ahora = new Date();
@@ -485,7 +626,7 @@ app.get("/api/horarios", requireAuth, requireRole("paciente", "recepcionista", "
                 const hora = aHHMM(min);
                 if (ocupadasSet.has(hora)) continue;
                 if (new Date(`${fecha}T${hora}:00${offset}`) <= ahora) continue; // no ofrecer horas pasadas
-                horarios.push(hora);
+                if (!horarios.includes(hora)) horarios.push(hora);
             }
         }
 
@@ -499,6 +640,8 @@ app.get("/api/horarios", requireAuth, requireRole("paciente", "recepcionista", "
 // Devuelve la franja de atención (con su sede) que cubre esa hora, o null si el médico no atiende.
 // Es la misma regla que ya usa POST /api/citas/admin: dentro de una franja activa y alineada al slot.
 async function franjaDelMedico(medicoId, fecha, hora, sedeId = null) {
+    if (DEVELOPER_MODE) return { sede_id: null };
+
     const horaSQL = `${hora}:00`;
     const franjas = await query(
         `SELECT sede_id FROM horarios
@@ -514,7 +657,7 @@ async function franjaDelMedico(medicoId, fecha, hora, sedeId = null) {
 }
 
 app.post("/api/citas", requireAuth, requireRole("paciente"), async (req, res) => {
-    const { medico_id, fecha, hora, motivo } = req.body;
+    const { medico_id, sede_id, fecha, hora, motivo } = req.body;
     if (!medico_id || !fecha || !hora) return res.status(400).json({ mensaje: "Médico, fecha y hora son obligatorios" });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fecha)) || !/^\d{2}:\d{2}$/.test(String(hora))) {
         return res.status(400).json({ mensaje: "La fecha u hora no tienen un formato válido" });
@@ -535,7 +678,7 @@ app.post("/api/citas", requireAuth, requireRole("paciente"), async (req, res) =>
         if (!medicos.length) return res.status(404).json({ mensaje: "El médico seleccionado no existe" });
 
         // El horario debe caer en una franja de atención del médico (día, hora y slot válidos).
-        const franja = await franjaDelMedico(medico_id, fecha, hora);
+        const franja = await franjaDelMedico(medico_id, fecha, hora, sede_id ? Number(sede_id) : null);
         if (!franja) return res.status(400).json({ mensaje: "El médico no atiende en ese día u hora" });
 
         const conflictos = await query(
@@ -543,6 +686,11 @@ app.post("/api/citas", requireAuth, requireRole("paciente"), async (req, res) =>
             [medico_id, fecha, hora]
         );
         if (conflictos.length) return res.status(409).json({ mensaje: "Ese horario ya está ocupado" });
+        const ofertaActiva = await query(
+            "SELECT oferta_id FROM lista_espera_ofertas WHERE medico_id = ? AND fecha_cita = ? AND hora_cita = ? AND estado = 'Pendiente' AND vence_en > NOW() LIMIT 1",
+            [medico_id, fecha, hora]
+        );
+        if (ofertaActiva.length) return res.status(409).json({ mensaje: "Ese horario está reservado temporalmente para una oferta de lista de espera" });
 
         const cita = await query(
             "INSERT INTO citas (paciente_id, medico_id, sede_id, fecha_cita, hora_cita, motivo) VALUES (?, ?, ?, ?, ?, ?)",
@@ -583,11 +731,15 @@ app.delete("/api/citas/:id", requireAuth, requireRole("paciente"), async (req, r
         const pacienteId = users[0]?.paciente_id;
         if (!pacienteId) return res.status(400).json({ mensaje: "El usuario no está asociado a un paciente" });
         
-        const citaInfo = await query("SELECT cita_id, medico_id, fecha_cita, hora_cita FROM citas WHERE cita_id = ? AND paciente_id = ?", [req.params.id, pacienteId]);
+        const citaInfo = await query(`
+            SELECT c.cita_id, c.medico_id, c.sede_id, c.fecha_cita, c.hora_cita, m.especialidad
+            FROM citas c JOIN medicos m ON m.medico_id = c.medico_id
+            WHERE c.cita_id = ? AND c.paciente_id = ?
+        `, [req.params.id, pacienteId]);
         if (!citaInfo.length) return res.status(404).json({ mensaje: "Cita no encontrada o no pertenece al paciente" });
 
         await query("UPDATE citas SET estado = 'Cancelada' WHERE cita_id = ?", [req.params.id]);
-        await reasignarCupoListaEspera(query, citaInfo[0]);
+        await reasignarCupoListaEspera(conexion, citaInfo[0], whatsappClient);
         res.json({ mensaje: "Cita cancelada correctamente" });
     } catch (error) {
         console.error("Error cancelando cita:", error.message);
@@ -612,7 +764,7 @@ app.delete("/api/citas/:id", requireAuth, requireRole("paciente"), async (req, r
 
 app.get("/api/lista-espera/:estado/count", requireAuth, requireRole("paciente"), async (req, res) => {
     // Estados de la tabla lista_espera (ENUM estado_espera), no los de las citas.
-    const estadosValidos = ["Activo", "Asignado", "Expirado"];
+    const estadosValidos = ["Activo", "Ofertado", "Asignado", "Expirado", "Cancelado"];
     const estado = req.params.estado;
     if (!estadosValidos.includes(estado)) return res.status(400).json({ mensaje: "Estado no válido" });
 
@@ -705,17 +857,17 @@ const schemas = {
     // Admin: Especialidades (se gestionan vía medicos)
     // Admin: Sedes
     crearSede: z.object({
-        nombre: z.string().min(2).max(100),
-        direccion: z.string().min(5).max(255),
-        telefono: z.string().max(20).optional(),
+        nombre: z.string().trim().min(2).max(100),
+        direccion: z.string().trim().min(5).max(255),
+        telefono: z.string().trim().max(20).optional(),
         activa: z.boolean().optional()
     }),
     actualizarSede: z.object({
-        nombre: z.string().min(2).max(100).optional(),
-        direccion: z.string().min(5).max(255).optional(),
-        telefono: z.string().max(20).optional().nullable(),
+        nombre: z.string().trim().min(2).max(100).optional(),
+        direccion: z.string().trim().min(5).max(255).optional(),
+        telefono: z.string().trim().max(20).optional().nullable(),
         activa: z.boolean().optional()
-    }),
+}),
     // Admin: Horarios
     crearHorario: z.object({
         medico_id: z.number().int().positive(),
@@ -802,17 +954,26 @@ const schemas = {
         especialidad_requerida: z.string().max(50).optional(),
         sede_id: z.number().int().positive().optional(),
         prioridad: z.enum(["Alta", "Media", "Baja"]).default("Media"),
-        observaciones: z.string().max(500).optional()
+        observaciones: z.string().max(500).optional(),
+        medico_preferido_id: z.number().int().positive().optional(),
+        fecha_desde: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        fecha_hasta: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        franja_horaria: z.enum(["Manana", "Tarde", "Cualquiera"]).default("Cualquiera")
     }),
     actualizarListaEspera: z.object({
         prioridad: z.enum(["Alta", "Media", "Baja"]).optional(),
-        estado_espera: z.enum(["Activo", "Asignado", "Expirado"]).optional(),
+        // Asignado solo lo establece la aceptación de una oferta real.
+        estado_espera: z.enum(["Activo", "Expirado", "Cancelado"]).optional(),
         observaciones: z.string().max(500).optional().nullable()
     }),
     // Paciente: inscribirse a la lista de espera (la prioridad la decide recepción)
     inscribirListaEsperaPaciente: z.object({
         especialidad_requerida: z.string().trim().min(2).max(50),
         sede_id: z.number().int().positive().optional(),
+        medico_preferido_id: z.number().int().positive().optional(),
+        fecha_desde: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        fecha_hasta: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        franja_horaria: z.enum(["Manana", "Tarde", "Cualquiera"]).default("Cualquiera"),
         observaciones: z.string().trim().max(500).optional()
     }),
     // Médico: Cambiar estado cita
@@ -870,7 +1031,7 @@ app.get("/api/reportes/resumen", requireAuth, requireRole("administrador"), asyn
                 WHERE fecha_cita >= DATE_FORMAT(NOW(), '%Y-%m-01')
                   AND fecha_cita < DATE_ADD(DATE_FORMAT(NOW(), '%Y-%m-01'), INTERVAL 1 MONTH)
             `),
-            query("SELECT COUNT(*) AS total FROM lista_espera WHERE estado_espera = 'Activo'")
+            query("SELECT COUNT(*) AS total FROM lista_espera WHERE estado_espera IN ('Activo','Ofertado')")
         ]);
 
         const ausentismo = citasAusentismo[0].total > 0
@@ -1083,10 +1244,13 @@ app.delete("/api/usuarios/:id", requireAuth, requireRole("administrador"), async
     }
 });
 
-// -------------------- ADMIN: SEDES --------------------
 app.get("/api/sedes", requireAuth, requireRole("administrador", "recepcionista", "medico", "paciente"), async (req, res) => {
     try {
-        const sedes = await query("SELECT sede_id, nombre, direccion, telefono, activa FROM sedes WHERE activa = 1 ORDER BY nombre");
+        // El administrador puede pedir también las inactivas con ?todas=1
+        const soloActivas = !(req.user.rol === "administrador" && req.query.todas === "1");
+        const sedes = await query(
+            `SELECT sede_id, nombre, direccion, telefono, activa FROM sedes ${soloActivas ? "WHERE activa = 1" : ""} ORDER BY nombre`
+        );
         res.json({ sedes });
     } catch (error) {
         console.error("Error listando sedes:", error.message);
@@ -1096,10 +1260,14 @@ app.get("/api/sedes", requireAuth, requireRole("administrador", "recepcionista",
 
 app.post("/api/sedes", requireAuth, requireRole("administrador"), validar(schemas.crearSede), async (req, res) => {
     try {
-        const { nombre, direccion, telefono, activa } = req.validated;
+        const { nombre, direccion, telefono, activa } = req.validated; // ya vienen sin espacios sobrantes
+
+        const existente = await query("SELECT sede_id FROM sedes WHERE LOWER(nombre) = LOWER(?)", [nombre]);
+        if (existente.length) return res.status(409).json({ mensaje: "Ya existe una sede con ese nombre" });
+
         const result = await query(
             "INSERT INTO sedes (nombre, direccion, telefono, activa) VALUES (?, ?, ?, ?)",
-            [nombre.trim(), direccion.trim(), telefono?.trim() || null, activa !== false ? 1 : 0]
+            [nombre, direccion, telefono || null, activa !== false ? 1 : 0]
         );
         res.status(201).json({ mensaje: "Sede creada correctamente", sede_id: result.insertId });
     } catch (error) {
@@ -1290,6 +1458,11 @@ app.put("/api/citas/:id/reprogramar", requireAuth, requireRole("paciente"), vali
             [medicoId, fecha, hora, id]
         );
         if (conflictos.length) return res.status(409).json({ mensaje: "Ese horario ya está ocupado para el médico seleccionado" });
+        const ofertaActiva = await query(
+            "SELECT oferta_id FROM lista_espera_ofertas WHERE medico_id = ? AND fecha_cita = ? AND hora_cita = ? AND estado = 'Pendiente' AND vence_en > NOW() LIMIT 1",
+            [medicoId, fecha, `${hora}:00`]
+        );
+        if (ofertaActiva.length) return res.status(409).json({ mensaje: "Ese horario está reservado temporalmente para una oferta de lista de espera" });
 
         // Actualizar cita
         await query(
@@ -1302,7 +1475,7 @@ app.put("/api/citas/:id/reprogramar", requireAuth, requireRole("paciente"), vali
         await query("UPDATE recordatorios SET estado_entrega = 'Pendiente', fecha_envio = NULL WHERE cita_id = ?", [id]);
 
         // Liberar el horario anterior reasignando a lista de espera
-        await reasignarCupoListaEspera(query, cita[0]);
+        await reasignarCupoListaEspera(conexion, cita[0], whatsappClient);
 
         res.json({ mensaje: "Cita reprogramada correctamente" });
     } catch (error) {
@@ -1433,10 +1606,12 @@ app.put("/api/citas/admin/:id", requireAuth, requireRole("recepcionista", "admin
     try {
         const { id } = req.params;
         const { medico_id, sede_id, fecha, hora, estado, motivo } = req.body;
-
-        const cita = await query("SELECT cita_id FROM citas WHERE cita_id = ?", [id]);
-        if (!cita.length) return res.status(404).json({ mensaje: "Cita no encontrada" });
-
+        const anteriores = await query(`
+            SELECT c.cita_id, c.estado, c.medico_id, c.sede_id, c.fecha_cita, c.hora_cita, m.especialidad
+            FROM citas c JOIN medicos m ON m.medico_id = c.medico_id WHERE c.cita_id = ?
+        `, [id]);
+        if (!anteriores.length) return res.status(404).json({ mensaje: "Cita no encontrada" });
+        const anterior = anteriores[0];
         const campos = [];
         const valores = [];
 
@@ -1454,33 +1629,48 @@ app.put("/api/citas/admin/:id", requireAuth, requireRole("recepcionista", "admin
         }
         if (fecha) { campos.push("fecha_cita = ?"); valores.push(fecha); }
         if (hora) { campos.push("hora_cita = ?"); valores.push(hora); }
-        if (estado) { campos.push("estado = ?"); valores.push(estado); }
+        if (estado) {
+            if (!["Pendiente", "Confirmada", "Cancelada", "Completada", "No-Asistio"].includes(estado)) {
+                return res.status(400).json({ mensaje: "Estado de cita no válido" });
+            }
+            campos.push("estado = ?"); valores.push(estado);
+        }
         if (motivo !== undefined) { campos.push("motivo = ?"); valores.push(motivo); }
-
         if (!campos.length) return res.status(400).json({ mensaje: "No hay datos para actualizar" });
 
-        // Verificar conflictos si cambian médico/fecha/hora
-        if (medico_id || fecha || hora) {
-            const actual = await query("SELECT medico_id, fecha_cita, hora_cita FROM citas WHERE cita_id = ?", [id]);
-            const mId = medico_id || actual[0].medico_id;
-            const f = fecha || actual[0].fecha_cita;
-            const h = hora || actual[0].hora_cita;
+        const reactivada = estado && !["Cancelada", "No-Asistio"].includes(estado)
+            && ["Cancelada", "No-Asistio"].includes(anterior.estado);
+        if (medico_id || fecha || hora || reactivada) {
+            const mId = medico_id || anterior.medico_id;
+            const f = fecha || anterior.fecha_cita;
+            const h = hora || anterior.hora_cita;
             const conflictos = await query(
                 "SELECT cita_id FROM citas WHERE medico_id = ? AND fecha_cita = ? AND hora_cita = ? AND estado NOT IN ('Cancelada', 'No-Asistio') AND cita_id <> ?",
                 [mId, f, h, id]
             );
             if (conflictos.length) return res.status(409).json({ mensaje: "Ese horario ya está ocupado" });
+            const ofertaActiva = await query(
+                "SELECT oferta_id FROM lista_espera_ofertas WHERE medico_id = ? AND fecha_cita = ? AND hora_cita = ? AND estado = 'Pendiente' AND vence_en > NOW() LIMIT 1",
+                [mId, f, h]
+            );
+            if (ofertaActiva.length) return res.status(409).json({ mensaje: "Ese horario está reservado temporalmente para una oferta de lista de espera" });
         }
 
         valores.push(id);
         await query(`UPDATE citas SET ${campos.join(", ")} WHERE cita_id = ?`, valores);
-
-        // Si se cambió fecha/hora, resetear recordatorio
         if (fecha || hora) {
             await query("UPDATE citas SET recordatorio_enviado = 0 WHERE cita_id = ?", [id]);
             await query("UPDATE recordatorios SET estado_entrega = 'Pendiente', fecha_envio = NULL WHERE cita_id = ?", [id]);
         }
 
+        const cambioSlot = (medico_id && Number(medico_id) !== Number(anterior.medico_id))
+            || (fecha && String(fecha).slice(0, 10) !== String(anterior.fecha_cita).slice(0, 10))
+            || (hora && String(hora).slice(0, 5) !== String(anterior.hora_cita).slice(0, 5))
+            || (sede_id !== undefined && Number(sede_id || 0) !== Number(anterior.sede_id || 0));
+        const cancelada = estado === "Cancelada" && ["Pendiente", "Confirmada"].includes(anterior.estado);
+        if ((cambioSlot || cancelada) && ["Pendiente", "Confirmada"].includes(anterior.estado)) {
+            await reasignarCupoListaEspera(conexion, anterior, whatsappClient);
+        }
         res.json({ mensaje: "Cita actualizada correctamente" });
     } catch (error) {
         console.error("Error actualizando cita (recepcionista):", error.message);
@@ -1491,31 +1681,62 @@ app.put("/api/citas/admin/:id", requireAuth, requireRole("recepcionista", "admin
 // -------------------- RECEPCIONISTA: LISTA DE ESPERA --------------------
 app.get("/api/lista-espera", requireAuth, requireRole("recepcionista", "administrador"), async (req, res) => {
     try {
-        const { estado, especialidad, page = 1, limit = 20 } = req.query;
+        const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
         const offset = (page - 1) * limit;
         const filtros = [];
-        let where = "WHERE 1=1";
+        const condiciones = [];
+        const estados = req.query.estado ? String(req.query.estado).split(",").filter(Boolean) : ["Activo", "Ofertado"];
 
-        if (estado) { where += " AND le.estado_espera = ?"; filtros.push(estado); }
-        if (especialidad) { where += " AND le.especialidad_requerida = ?"; filtros.push(especialidad); }
-
+        if (estados.length) {
+            condiciones.push(`le.estado_espera IN (${estados.map(() => "?").join(",")})`);
+            filtros.push(...estados);
+        }
+        if (req.query.especialidad) {
+            condiciones.push("le.especialidad_requerida = ?");
+            filtros.push(String(req.query.especialidad));
+        }
+        if (req.query.sede_id) {
+            condiciones.push("le.sede_id = ?");
+            filtros.push(Number(req.query.sede_id));
+        }
+        if (req.query.fecha_desde) {
+            condiciones.push("(le.fecha_hasta IS NULL OR le.fecha_hasta >= ?)");
+            filtros.push(String(req.query.fecha_desde));
+        }
+        if (req.query.fecha_hasta) {
+            condiciones.push("(le.fecha_desde IS NULL OR le.fecha_desde <= ?)");
+            filtros.push(String(req.query.fecha_hasta));
+        }
+        if (req.query.q) {
+            condiciones.push("(p.nombre_completo LIKE ? OR p.documento_id LIKE ?)");
+            filtros.push(`%${String(req.query.q).slice(0, 100)}%`, `%${String(req.query.q).slice(0, 100)}%`);
+        }
+        const where = condiciones.length ? `WHERE ${condiciones.join(" AND ")}` : "";
         const [total, espera] = await Promise.all([
-            query(`SELECT COUNT(*) AS total FROM lista_espera le ${where}`, filtros),
+            query(`SELECT COUNT(*) AS total FROM lista_espera le JOIN pacientes p ON p.paciente_id = le.paciente_id ${where}`, filtros),
             query(`
                 SELECT le.espera_id, le.paciente_id, le.especialidad_requerida, le.sede_id,
+                       le.medico_preferido_id, le.fecha_desde, le.fecha_hasta, le.franja_horaria,
                        le.fecha_inscripcion, le.prioridad, le.estado_espera, le.observaciones,
                        p.nombre_completo, p.documento_id, p.telefono_whatsapp,
-                       s.nombre AS sede_nombre
+                       pr.nivel_riesgo AS riesgo_no_show, pr.score AS score_no_show,
+                       s.nombre AS sede_nombre, mp.nombre_completo AS medico_preferido,
+                       o.oferta_id, o.fecha_cita AS oferta_fecha, o.hora_cita AS oferta_hora,
+                       o.vence_en AS oferta_vence_en, om.nombre_completo AS oferta_medico
                 FROM lista_espera le
                 JOIN pacientes p ON p.paciente_id = le.paciente_id
+                LEFT JOIN paciente_riesgo_no_show pr ON pr.paciente_id = le.paciente_id
                 LEFT JOIN sedes s ON s.sede_id = le.sede_id
+                LEFT JOIN medicos mp ON mp.medico_id = le.medico_preferido_id
+                LEFT JOIN lista_espera_ofertas o ON o.espera_id = le.espera_id AND o.estado = 'Pendiente'
+                LEFT JOIN medicos om ON om.medico_id = o.medico_id
                 ${where}
-                ORDER BY FIELD(le.prioridad, 'Alta', 'Media', 'Baja'), le.fecha_inscripcion
+                ORDER BY FIELD(le.prioridad, 'Alta', 'Media', 'Baja'), le.fecha_inscripcion, le.espera_id
                 LIMIT ? OFFSET ?
-            `, [...filtros, Number(limit), offset])
+            `, [...filtros, limit, offset])
         ]);
-
-        res.json({ lista_espera: espera, total: total[0].total, page: Number(page), limit: Number(limit) });
+        res.json({ lista_espera: espera, total: total[0].total, page, limit });
     } catch (error) {
         console.error("Error listando lista de espera:", error.message);
         res.status(500).json({ mensaje: "No fue posible listar la lista de espera" });
@@ -1524,27 +1745,50 @@ app.get("/api/lista-espera", requireAuth, requireRole("recepcionista", "administ
 
 app.post("/api/lista-espera", requireAuth, requireRole("recepcionista", "administrador"), validar(schemas.crearListaEspera), async (req, res) => {
     try {
-        const { documento, especialidad_requerida, sede_id, prioridad, observaciones } = req.validated;
-
-        // Buscar paciente por documento
-        const pacientes = await query("SELECT paciente_id, nombre_completo FROM pacientes WHERE documento_id = ?", [documento.trim()]);
+        const {
+            documento, especialidad_requerida, sede_id, medico_preferido_id,
+            fecha_desde, fecha_hasta, franja_horaria, prioridad, observaciones
+        } = req.validated;
+        const pacientes = await query("SELECT paciente_id FROM pacientes WHERE documento_id = ?", [documento.trim()]);
         if (!pacientes.length) return res.status(404).json({ mensaje: "Paciente no encontrado con ese documento" });
-
         const pacienteId = pacientes[0].paciente_id;
-
-        // Verificar si ya está en lista de espera activa para esa especialidad
+        if (fecha_desde && fecha_hasta && fecha_hasta < fecha_desde) {
+            return res.status(400).json({ mensaje: "La fecha final no puede ser anterior a la fecha inicial" });
+        }
+        const hoyLocal = new Date().toLocaleDateString("sv-SE", { timeZone: process.env.CLINIC_TIMEZONE || "America/Bogota" });
+        if ((fecha_desde && fecha_desde < hoyLocal) || (fecha_hasta && fecha_hasta < hoyLocal)) {
+            return res.status(400).json({ mensaje: "Las fechas de preferencia no pueden estar en el pasado" });
+        }
+        if (sede_id) {
+            const sede = await query("SELECT sede_id FROM sedes WHERE sede_id = ? AND activa = 1", [sede_id]);
+            if (!sede.length) return res.status(404).json({ mensaje: "La sede seleccionada no existe o está inactiva" });
+        }
+        if (medico_preferido_id) {
+            const medico = await query("SELECT medico_id, especialidad FROM medicos WHERE medico_id = ? AND activo = 1", [medico_preferido_id]);
+            if (!medico.length) return res.status(404).json({ mensaje: "El médico preferido no existe o está inactivo" });
+            if (especialidad_requerida && medico[0].especialidad !== especialidad_requerida) {
+                return res.status(400).json({ mensaje: "El médico preferido no pertenece a la especialidad seleccionada" });
+            }
+        }
         const existente = await query(
-            "SELECT espera_id FROM lista_espera WHERE paciente_id = ? AND estado_espera = 'Activo' AND (especialidad_requerida = ? OR (especialidad_requerida IS NULL AND ? IS NULL))",
+            `SELECT espera_id FROM lista_espera
+             WHERE paciente_id = ? AND estado_espera IN ('Activo','Ofertado')
+               AND (especialidad_requerida = ? OR (especialidad_requerida IS NULL AND ? IS NULL))
+             LIMIT 1`,
             [pacienteId, especialidad_requerida || null, especialidad_requerida || null]
         );
         if (existente.length) return res.status(409).json({ mensaje: "El paciente ya está en lista de espera para esa especialidad" });
 
-        const result = await query(
-            `INSERT INTO lista_espera (paciente_id, especialidad_requerida, sede_id, prioridad, estado_espera, observaciones)
-             VALUES (?, ?, ?, ?, 'Activo', ?)`,
-            [pacienteId, especialidad_requerida?.trim() || null, sede_id || null, prioridad, observaciones?.trim() || null]
-        );
-
+        const result = await query(`
+            INSERT INTO lista_espera
+                (paciente_id, especialidad_requerida, sede_id, medico_preferido_id, fecha_desde, fecha_hasta,
+                 franja_horaria, prioridad, estado_espera, observaciones)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Activo', ?)
+        `, [
+            pacienteId, especialidad_requerida?.trim() || null, sede_id || null, medico_preferido_id || null,
+            fecha_desde || null, fecha_hasta || null, franja_horaria || "Cualquiera", prioridad,
+            observaciones?.trim() || null
+        ]);
         res.status(201).json({ mensaje: "Paciente inscrito en lista de espera", espera_id: result.insertId });
     } catch (error) {
         console.error("Error inscribiendo en lista de espera:", error.message);
@@ -1556,7 +1800,12 @@ app.put("/api/lista-espera/:id", requireAuth, requireRole("recepcionista", "admi
     try {
         const { id } = req.params;
         const data = req.validated;
-
+        const ofertaPendiente = data.estado_espera && data.estado_espera !== "Ofertado"
+            ? await query(`
+                SELECT o.medico_id, o.sede_id, o.fecha_cita, o.hora_cita, o.especialidad
+                FROM lista_espera_ofertas o WHERE o.espera_id = ? AND o.estado = 'Pendiente' LIMIT 1
+            `, [id])
+            : [];
         const campos = [];
         const valores = [];
         for (const [key, value] of Object.entries(data)) {
@@ -1566,9 +1815,13 @@ app.put("/api/lista-espera/:id", requireAuth, requireRole("recepcionista", "admi
             }
         }
         if (!campos.length) return res.status(400).json({ mensaje: "No hay datos para actualizar" });
-
         valores.push(id);
-        await query(`UPDATE lista_espera SET ${campos.join(", ")} WHERE espera_id = ?`, valores);
+        const actualizacion = await query(`UPDATE lista_espera SET ${campos.join(", ")} WHERE espera_id = ?`, valores);
+        if (!actualizacion.affectedRows) return res.status(404).json({ mensaje: "Inscripción no encontrada" });
+        if (data.estado_espera && data.estado_espera !== "Ofertado") {
+            await query("UPDATE lista_espera_ofertas SET estado = 'Cancelada', fecha_respuesta = NOW() WHERE espera_id = ? AND estado = 'Pendiente'", [id]);
+            if (ofertaPendiente[0]) await reasignarCupoListaEspera(conexion, ofertaPendiente[0], whatsappClient);
+        }
         res.json({ mensaje: "Lista de espera actualizada correctamente" });
     } catch (error) {
         console.error("Error actualizando lista de espera:", error.message);
@@ -1578,21 +1831,70 @@ app.put("/api/lista-espera/:id", requireAuth, requireRole("recepcionista", "admi
 
 app.delete("/api/lista-espera/:id", requireAuth, requireRole("recepcionista", "administrador"), async (req, res) => {
     try {
-        const { id } = req.params;
-        await query("DELETE FROM lista_espera WHERE espera_id = ?", [id]);
-        res.json({ mensaje: "Entrada de lista de espera eliminada correctamente" });
+        const ofertaPendiente = await query(`
+            SELECT medico_id, sede_id, fecha_cita, hora_cita, especialidad
+            FROM lista_espera_ofertas WHERE espera_id = ? AND estado = 'Pendiente' LIMIT 1
+        `, [req.params.id]);
+        const result = await query(
+            "UPDATE lista_espera SET estado_espera = 'Cancelado' WHERE espera_id = ? AND estado_espera IN ('Activo','Ofertado')",
+            [req.params.id]
+        );
+        if (!result.affectedRows) return res.status(404).json({ mensaje: "Inscripción no encontrada o ya finalizada" });
+        await query("UPDATE lista_espera_ofertas SET estado = 'Cancelada', fecha_respuesta = NOW() WHERE espera_id = ? AND estado = 'Pendiente'", [req.params.id]);
+        if (ofertaPendiente[0]) await reasignarCupoListaEspera(conexion, ofertaPendiente[0], whatsappClient);
+        res.json({ mensaje: "Inscripción cancelada. Se conservará el historial de ofertas." });
     } catch (error) {
-        console.error("Error eliminando lista de espera:", error.message);
-        res.status(500).json({ mensaje: "No fue posible eliminar la entrada" });
+        console.error("Error cancelando lista de espera:", error.message);
+        res.status(500).json({ mensaje: "No fue posible cancelar la inscripción" });
+    }
+});
+
+// -------------------- RECEPCIÓN: HISTORIAL DE OFERTAS --------------------
+app.get("/api/lista-espera/ofertas", requireAuth, requireRole("recepcionista", "administrador"), async (req, res) => {
+    try {
+        const limit = Math.min(200, Math.max(1, Number.parseInt(req.query.limit, 10) || 100));
+        const ofertas = await query(`
+            SELECT o.oferta_id, o.espera_id, o.paciente_id, o.medico_id, o.sede_id,
+                   o.fecha_cita, o.hora_cita, o.especialidad, o.estado, o.fecha_oferta,
+                   o.vence_en, o.fecha_respuesta, o.cita_id,
+                   p.nombre_completo AS paciente, p.documento_id,
+                   m.nombre_completo AS medico, s.nombre AS sede,
+                   le.prioridad
+            FROM lista_espera_ofertas o
+            JOIN pacientes p ON p.paciente_id = o.paciente_id
+            JOIN medicos m ON m.medico_id = o.medico_id
+            LEFT JOIN sedes s ON s.sede_id = o.sede_id
+            LEFT JOIN lista_espera le ON le.espera_id = o.espera_id
+            ORDER BY o.fecha_oferta DESC, o.oferta_id DESC
+            LIMIT ?
+        `, [limit]);
+        res.json({ ofertas });
+    } catch (error) {
+        console.error("Error consultando historial de ofertas:", error.message);
+        res.status(500).json({ mensaje: "No fue posible consultar el historial de ofertas" });
+    }
+});
+
+app.post("/api/lista-espera/ofertas/:id/cancelar", requireAuth, requireRole("recepcionista", "administrador"), async (req, res) => {
+    try {
+        const oferta = await query("SELECT oferta_id FROM lista_espera_ofertas WHERE oferta_id = ? AND estado = 'Pendiente'", [req.params.id]);
+        if (!oferta.length) return res.status(404).json({ mensaje: "Oferta pendiente no encontrada" });
+        const resultado = await responderOfertaListaEspera(conexion, {
+            ofertaId: Number(req.params.id), decision: "CANCELAR", client: whatsappClient
+        });
+        res.status(resultado.status || 200).json({ ...resultado, mensaje: resultado.mensaje || "Oferta cancelada" });
+    } catch (error) {
+        console.error("Error cancelando oferta desde recepción:", error.message);
+        res.status(500).json({ mensaje: "No fue posible cancelar la oferta" });
     }
 });
 
 // -------------------- MÉDICO: AGENDA --------------------
 app.get("/api/citas/medico", requireAuth, requireRole("medico"), async (req, res) => {
     try {
-        const { fecha } = req.query;
-        if (!fecha || Number.isNaN(Date.parse(fecha))) {
-            return res.status(400).json({ mensaje: "Fecha es obligatoria" });
+        const fecha = req.query.fecha || hoyClinica();
+        if (!esFechaValida(fecha)) {
+            return res.status(400).json({ mensaje: "La fecha no es válida (use AAAA-MM-DD)" });
         }
  
         // Obtener medico_id del usuario logueado
@@ -1639,15 +1941,40 @@ app.put("/api/citas/:id/estado", requireAuth, requireRole("medico", "recepcionis
     try {
         const { id } = req.params;
         const { estado } = req.validated;
+        if (!/^\d+$/.test(id)) return res.status(400).json({ mensaje: "Identificador de cita no válido" });
 
         // Verificar permisos: médico solo puede modificar sus citas
         if (req.user.rol === "medico") {
+            if (!["Completada", "No-Asistio"].includes(estado)) {
+                return res.status(400).json({ mensaje: "El médico solo puede marcar Completada o No-Asistio" });
+            }
             const users = await query("SELECT medico_id FROM usuarios WHERE usuario_id = ? AND rol = 'medico' AND activo = 1", [req.user.id]);
             const medicoId = users[0]?.medico_id;
             if (!medicoId) return res.status(400).json({ mensaje: "Usuario no asociado a médico" });
 
-            const cita = await query("SELECT cita_id FROM citas WHERE cita_id = ? AND medico_id = ?", [id, medicoId]);
-            if (!cita.length) return res.status(404).json({ mensaje: "Cita no encontrada o no pertenece a este médico" });
+            const citas = await query(
+                "SELECT estado, DATE_FORMAT(fecha_cita, '%Y-%m-%d') AS fecha FROM citas WHERE cita_id = ? AND medico_id = ?",
+                [id, medicoId]
+            );
+            if (!citas.length) return res.status(404).json({ mensaje: "Cita no encontrada o no pertenece a este médico" });
+
+            const cita = citas[0];
+            if (cita.estado === "Cancelada") return res.status(409).json({ mensaje: "No se puede modificar una cita cancelada" });
+            if (cita.estado === estado) return res.status(409).json({ mensaje: `La cita ya está marcada como ${estado}` });
+            if (cita.fecha > hoyClinica()) return res.status(409).json({ mensaje: "No puedes registrar la asistencia de una cita futura" });
+
+            const actualizacion = await query(
+                `UPDATE citas SET estado = ?
+                 WHERE cita_id = ? AND medico_id = ? AND estado IN ('Pendiente', 'Confirmada', 'Completada', 'No-Asistio')`,
+                [estado, id, medicoId]
+            );
+            if (actualizacion.affectedRows === 0) {
+                return res.status(409).json({ mensaje: "La cita cambió mientras la editabas. Recarga la agenda." });
+            }
+            return res.json({
+                mensaje: estado === "Completada" ? "Cita marcada como atendida" : "Cita marcada como inasistencia",
+                estado
+            });
         }
 
         const estadosValidos = ["Confirmada", "Completada", "No-Asistio"];
@@ -1740,11 +2067,17 @@ app.get("/api/test", (req, res) => {
 console.log("DEBUG: Test route registered");
 
 initializeAuth()
+    .then(() => migrar({ query }))
     .then(() => app.listen(3000, async () => {
         console.log("Servidor iniciado en http://localhost:3000");
         console.log(`WhatsApp: ${process.env.ENABLE_WHATSAPP === "true" ? "activado" : "desactivado"}`);
+        cron.schedule("* * * * *", () => {
+            expirarOfertasListaEspera(conexion, whatsappClient).catch((error) =>
+                console.error("Error procesando vencimientos de lista de espera:", error.message)
+            );
+        });
         try {
-            await iniciarWhatsApp({ query });
+            whatsappClient = await iniciarWhatsApp({ query, db: conexion });
         } catch (error) {
             console.error("No fue posible iniciar WhatsApp:", error.message);
         }
@@ -1808,18 +2141,20 @@ app.post("/api/citas/admin", requireAuth, requireRole("recepcionista", "administ
         const medicos = await query("SELECT medico_id FROM medicos WHERE medico_id = ? AND activo = 1", [medico_id]);
         if (!medicos.length) return res.status(404).json({ mensaje: "El médico seleccionado no existe o está inactivo" });
 
-        // La hora debe caer dentro de una franja activa del médico y alinearse con duracion_slot
-        // (con slots de 30 min: 08:00 y 08:30 son válidas, 08:10 no). dia_semana: 0 = domingo.
-        const franjas = await query(
-            `SELECT sede_id FROM horarios
-             WHERE medico_id = ? AND activo = 1
-               AND dia_semana = DAYOFWEEK(?) - 1
-               AND ? >= hora_inicio AND ? < hora_fin
-               AND MOD(TIME_TO_SEC(TIMEDIFF(?, hora_inicio)), duracion_slot * 60) = 0
-               AND (? IS NULL OR sede_id = ?)
-             LIMIT 1`,
-            [medico_id, fecha, horaSQL, horaSQL, horaSQL, sede_id ?? null, sede_id ?? null]
-        );
+        // Fuera de desarrollo, la hora debe caer dentro de una franja activa
+        // y alinearse con la duración configurada del slot. dia_semana: 0 = domingo.
+        const franjas = DEVELOPER_MODE
+            ? [{ sede_id: null }]
+            : await query(
+                `SELECT sede_id FROM horarios
+                 WHERE medico_id = ? AND activo = 1
+                   AND dia_semana = DAYOFWEEK(?) - 1
+                   AND ? >= hora_inicio AND ? < hora_fin
+                   AND MOD(TIME_TO_SEC(TIMEDIFF(?, hora_inicio)), duracion_slot * 60) = 0
+                   AND (? IS NULL OR sede_id = ?)
+                 LIMIT 1`,
+                [medico_id, fecha, horaSQL, horaSQL, horaSQL, sede_id ?? null, sede_id ?? null]
+            );
         if (!franjas.length) {
             return res.status(400).json({ mensaje: "El médico no atiende en ese día u hora" });
         }
@@ -1830,6 +2165,11 @@ app.post("/api/citas/admin", requireAuth, requireRole("recepcionista", "administ
             [medico_id, fecha, horaSQL]
         );
         if (conflictos.length) return res.status(409).json({ mensaje: "Ese horario ya está ocupado" });
+        const ofertaActiva = await query(
+            "SELECT oferta_id FROM lista_espera_ofertas WHERE medico_id = ? AND fecha_cita = ? AND hora_cita = ? AND estado = 'Pendiente' AND vence_en > NOW() LIMIT 1",
+            [medico_id, fecha, horaSQL]
+        );
+        if (ofertaActiva.length) return res.status(409).json({ mensaje: "Ese horario está reservado temporalmente para una oferta de lista de espera" });
 
         // El trigger trg_crear_recordatorio ya crea el recordatorio de WhatsApp pendiente.
         const cita = await query(
@@ -1858,91 +2198,137 @@ async function pacienteIdDeUsuario(usuarioId) {
 // ============================================================
 // PACIENTE: LISTA DE ESPERA
 // ============================================================
- 
-// Entradas activas del paciente, con su posición en la cola de esa especialidad.
-// No se devuelven `observaciones` (son notas internas de recepción).
 app.get("/api/lista-espera/me", requireAuth, requireRole("paciente"), async (req, res) => {
     try {
         const pacienteId = await pacienteIdDeUsuario(req.user.id);
         if (!pacienteId) return res.status(400).json({ mensaje: "El usuario no está asociado a un paciente" });
- 
-        // posicion = 1 + cuántos activos de la misma especialidad van antes:
-        // mayor prioridad primero y, a igual prioridad, el que se inscribió antes.
         const lista = await query(`
-            SELECT le.espera_id, le.especialidad_requerida, s.nombre AS sede, le.prioridad,
-                   DATE_FORMAT(le.fecha_inscripcion, '%Y-%m-%d %H:%i') AS fecha_inscripcion,
-                   1 + (
-                       SELECT COUNT(*) FROM lista_espera o
-                       WHERE o.estado_espera = 'Activo'
-                         AND o.especialidad_requerida <=> le.especialidad_requerida
-                         AND (
-                             FIELD(o.prioridad, 'Alta', 'Media', 'Baja') < FIELD(le.prioridad, 'Alta', 'Media', 'Baja')
-                             OR (o.prioridad = le.prioridad AND (
-                                 o.fecha_inscripcion < le.fecha_inscripcion
-                                 OR (o.fecha_inscripcion = le.fecha_inscripcion AND o.espera_id < le.espera_id)
-                             ))
-                         )
-                   ) AS posicion
+            SELECT le.espera_id, le.especialidad_requerida, le.sede_id, s.nombre AS sede,
+                   le.medico_preferido_id, mp.nombre_completo AS medico_preferido,
+                   DATE_FORMAT(le.fecha_desde, '%Y-%m-%d') AS fecha_desde,
+                   DATE_FORMAT(le.fecha_hasta, '%Y-%m-%d') AS fecha_hasta,
+                   le.franja_horaria, le.prioridad, le.estado_espera,
+                   le.fecha_inscripcion,
+                   CASE WHEN le.estado_espera = 'Ofertado' THEN o.oferta_id ELSE NULL END AS oferta_id,
+                   DATE_FORMAT(o.fecha_cita, '%Y-%m-%d') AS oferta_fecha,
+                   TIME_FORMAT(o.hora_cita, '%H:%i') AS oferta_hora,
+                   DATE_FORMAT(o.vence_en, '%Y-%m-%d %H:%i:%s') AS oferta_vence_en,
+                   om.nombre_completo AS oferta_medico
             FROM lista_espera le
             LEFT JOIN sedes s ON s.sede_id = le.sede_id
-            WHERE le.paciente_id = ? AND le.estado_espera = 'Activo'
-            ORDER BY le.fecha_inscripcion DESC
+            LEFT JOIN medicos mp ON mp.medico_id = le.medico_preferido_id
+            LEFT JOIN lista_espera_ofertas o ON o.espera_id = le.espera_id AND o.estado = 'Pendiente' AND o.vence_en > NOW()
+            LEFT JOIN medicos om ON om.medico_id = o.medico_id
+            WHERE le.paciente_id = ? AND le.estado_espera IN ('Activo','Ofertado')
+            ORDER BY FIELD(le.estado_espera, 'Ofertado','Activo'), le.fecha_inscripcion DESC
         `, [pacienteId]);
- 
-        res.json({ lista_espera: lista });
+
+        const listaConPosicion = await Promise.all(lista.map(async (entrada) => {
+            if (entrada.estado_espera === "Ofertado") return { ...entrada, posicion: null };
+            const posicion = await query(`
+                SELECT 1 + COUNT(*) AS posicion FROM lista_espera o
+                WHERE o.estado_espera = 'Activo'
+                  AND o.especialidad_requerida <=> ?
+                  AND (o.sede_id IS NULL OR ? IS NULL OR o.sede_id = ?)
+                  AND (
+                    FIELD(o.prioridad, 'Alta', 'Media', 'Baja') < FIELD(?, 'Alta', 'Media', 'Baja')
+                    OR (o.prioridad = ? AND (o.fecha_inscripcion < ? OR (o.fecha_inscripcion = ? AND o.espera_id < ?)))
+                  )
+            `, [entrada.especialidad_requerida, entrada.sede_id, entrada.sede_id, entrada.prioridad,
+                entrada.prioridad, entrada.fecha_inscripcion, entrada.fecha_inscripcion, entrada.espera_id]);
+            return { ...entrada, posicion: Number(posicion[0]?.posicion || 1) };
+        }));
+        res.json({ lista_espera: listaConPosicion });
     } catch (error) {
         console.error("Error consultando lista de espera del paciente:", error.message);
         res.status(500).json({ mensaje: "No fue posible consultar la lista de espera" });
     }
 });
- 
-// El paciente se inscribe a una especialidad (prioridad Media; recepción puede subirla).
+
 app.post("/api/lista-espera/me", requireAuth, requireRole("paciente"), validar(schemas.inscribirListaEsperaPaciente), async (req, res) => {
     try {
-        const { especialidad_requerida, sede_id, observaciones } = req.validated;
- 
+        const { especialidad_requerida, sede_id, medico_preferido_id, fecha_desde, fecha_hasta, franja_horaria, observaciones } = req.validated;
         const pacienteId = await pacienteIdDeUsuario(req.user.id);
         if (!pacienteId) return res.status(400).json({ mensaje: "El usuario no está asociado a un paciente" });
- 
-        // Solo especialidades que existan (las especialidades salen de medicos.especialidad)
-        const especialidades = await query(
-            "SELECT 1 FROM medicos WHERE especialidad = ? AND activo = 1 LIMIT 1",
-            [especialidad_requerida]
-        );
+        const especialidades = await query("SELECT 1 FROM medicos WHERE especialidad = ? AND activo = 1 LIMIT 1", [especialidad_requerida]);
         if (!especialidades.length) return res.status(404).json({ mensaje: "La especialidad seleccionada no está disponible" });
- 
-        if (sede_id !== undefined) {
-            const sedes = await query("SELECT sede_id FROM sedes WHERE sede_id = ? AND activa = 1", [sede_id]);
-            if (!sedes.length) return res.status(404).json({ mensaje: "La sede seleccionada no existe" });
+        if (fecha_desde && fecha_hasta && fecha_hasta < fecha_desde) return res.status(400).json({ mensaje: "La fecha final no puede ser anterior a la inicial" });
+        const hoyLocal = new Date().toLocaleDateString("sv-SE", { timeZone: process.env.CLINIC_TIMEZONE || "America/Bogota" });
+        if ((fecha_desde && fecha_desde < hoyLocal) || (fecha_hasta && fecha_hasta < hoyLocal)) {
+            return res.status(400).json({ mensaje: "Las fechas de preferencia no pueden estar en el pasado" });
         }
- 
+        if (sede_id) {
+            const sedes = await query("SELECT sede_id FROM sedes WHERE sede_id = ? AND activa = 1", [sede_id]);
+            if (!sedes.length) return res.status(404).json({ mensaje: "La sede seleccionada no existe o está inactiva" });
+        }
+        if (medico_preferido_id) {
+            const medico = await query("SELECT medico_id, especialidad FROM medicos WHERE medico_id = ? AND activo = 1", [medico_preferido_id]);
+            if (!medico.length) return res.status(404).json({ mensaje: "El médico seleccionado no existe o está inactivo" });
+            if (medico[0].especialidad !== especialidad_requerida) return res.status(400).json({ mensaje: "El médico seleccionado no corresponde a esa especialidad" });
+        }
         const existente = await query(
-            "SELECT espera_id FROM lista_espera WHERE paciente_id = ? AND estado_espera = 'Activo' AND especialidad_requerida = ?",
+            "SELECT espera_id FROM lista_espera WHERE paciente_id = ? AND estado_espera IN ('Activo','Ofertado') AND especialidad_requerida = ? LIMIT 1",
             [pacienteId, especialidad_requerida]
         );
         if (existente.length) return res.status(409).json({ mensaje: "Ya estás en la lista de espera de esa especialidad" });
- 
-        const result = await query(
-            `INSERT INTO lista_espera (paciente_id, especialidad_requerida, sede_id, prioridad, estado_espera, observaciones)
-             VALUES (?, ?, ?, 'Media', 'Activo', ?)`,
-            [pacienteId, especialidad_requerida, sede_id ?? null, observaciones || null]
-        );
- 
+        const result = await query(`
+            INSERT INTO lista_espera
+                (paciente_id, especialidad_requerida, sede_id, medico_preferido_id, fecha_desde, fecha_hasta,
+                 franja_horaria, prioridad, estado_espera, observaciones)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'Media', 'Activo', ?)
+        `, [pacienteId, especialidad_requerida, sede_id || null, medico_preferido_id || null,
+            fecha_desde || null, fecha_hasta || null, franja_horaria || "Cualquiera", observaciones || null]);
         res.status(201).json({ mensaje: "Quedaste inscrito en la lista de espera", espera_id: result.insertId });
     } catch (error) {
         console.error("Error inscribiendo al paciente en lista de espera:", error.message);
         res.status(500).json({ mensaje: "No fue posible inscribirte en la lista de espera" });
     }
 });
- 
-// Número para el KPI "En lista de espera" del dashboard (misma forma que /citas/:estado/count).
+
+app.delete("/api/lista-espera/me/:id", requireAuth, requireRole("paciente"), async (req, res) => {
+    try {
+        const pacienteId = await pacienteIdDeUsuario(req.user.id);
+        if (!pacienteId) return res.status(400).json({ mensaje: "El usuario no está asociado a un paciente" });
+        const ofertaPendiente = await query(`
+            SELECT medico_id, sede_id, fecha_cita, hora_cita, especialidad
+            FROM lista_espera_ofertas WHERE espera_id = ? AND estado = 'Pendiente' LIMIT 1
+        `, [req.params.id]);
+        const result = await query(
+            "UPDATE lista_espera SET estado_espera = 'Cancelado' WHERE espera_id = ? AND paciente_id = ? AND estado_espera IN ('Activo','Ofertado')",
+            [req.params.id, pacienteId]
+        );
+        if (!result.affectedRows) return res.status(404).json({ mensaje: "Inscripción no encontrada o ya finalizada" });
+        await query("UPDATE lista_espera_ofertas SET estado = 'Cancelada', fecha_respuesta = NOW() WHERE espera_id = ? AND estado = 'Pendiente'", [req.params.id]);
+        if (ofertaPendiente[0]) await reasignarCupoListaEspera(conexion, ofertaPendiente[0], whatsappClient);
+        res.json({ mensaje: "Te retiraste de la lista de espera" });
+    } catch (error) {
+        console.error("Error retirando inscripción de lista de espera:", error.message);
+        res.status(500).json({ mensaje: "No fue posible cancelar la inscripción" });
+    }
+});
+
+app.post("/api/lista-espera/ofertas/:id/responder", requireAuth, requireRole("paciente"), async (req, res) => {
+    try {
+        const pacienteId = await pacienteIdDeUsuario(req.user.id);
+        if (!pacienteId) return res.status(400).json({ mensaje: "El usuario no está asociado a un paciente" });
+        const decision = String(req.body?.decision || "").toUpperCase();
+        if (!["ACEPTAR", "RECHAZAR"].includes(decision)) return res.status(400).json({ mensaje: "La respuesta debe ser ACEPTAR o RECHAZAR" });
+        const resultado = await responderOfertaListaEspera(conexion, {
+            ofertaId: Number(req.params.id), pacienteId, decision, client: whatsappClient
+        });
+        res.status(resultado.status || (resultado.ok ? 200 : 400)).json(resultado);
+    } catch (error) {
+        console.error("Error respondiendo oferta desde el portal:", error.message);
+        res.status(500).json({ mensaje: "No fue posible responder la oferta" });
+    }
+});
+
 app.get("/api/lista-espera/me/count", requireAuth, requireRole("paciente"), async (req, res) => {
     try {
         const pacienteId = await pacienteIdDeUsuario(req.user.id);
         if (!pacienteId) return res.status(400).json({ mensaje: "El usuario no está asociado a un paciente" });
- 
         const result = await query(
-            "SELECT COUNT(*) AS total_espera FROM lista_espera WHERE paciente_id = ? AND estado_espera = 'Activo'",
+            "SELECT COUNT(*) AS total_espera FROM lista_espera WHERE paciente_id = ? AND estado_espera IN ('Activo','Ofertado')",
             [pacienteId]
         );
         res.json({ total_espera: result[0].total_espera });
@@ -1951,7 +2337,7 @@ app.get("/api/lista-espera/me/count", requireAuth, requireRole("paciente"), asyn
         res.status(500).json({ mensaje: "No fue posible consultar la lista de espera" });
     }
 });
- 
+
 // ============================================================
 // PACIENTE: CONFIRMAR CITA DESDE EL PORTAL
 // ============================================================

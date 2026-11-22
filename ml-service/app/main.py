@@ -38,11 +38,11 @@ async def lifespan(app: FastAPI):
         if model_files:
             latest = max(model_files, key=lambda f: os.path.getmtime(os.path.join(model_dir, f)))
             predictor = ModelPredictor(os.path.join(model_dir, latest))
-            print(f"✅ Modelo cargado: {latest}")
+            print(f"Modelo cargado: {latest}")
         else:
-            print("⚠️ No hay modelo entrenado. Entrena primero con POST /train")
+            print("No hay modelo entrenado. Entrena primero con POST /train")
     else:
-        print(f"⚠️ Directorio de modelos no existe: {model_dir}")
+        print(f"Directorio de modelos no existe: {model_dir}")
 
     yield
 
@@ -120,9 +120,9 @@ async def train_model(request: TrainRequest, background_tasks: BackgroundTasks):
 
             # Recargar modelo
             predictor = ModelPredictor(result['model_path'])
-            print(f"✅ Modelo reentrenado: {result['run_id']}, AUC: {result['auc']:.4f}")
+            print(f"Modelo reentrenado: {result['run_id']}, AUC: {result['auc']:.4f}")
         except Exception as e:
-            print(f"❌ Error en entrenamiento: {e}")
+            print(f"Error en entrenamiento: {e}")
 
     background_tasks.add_task(train_background)
     return {

@@ -14,7 +14,7 @@
 
 **Sistema web para el control y la gestión inteligente de citas médicas.**
 
-[Descripción](#descripción) · [Funcionalidades](#funcionalidades) · [Instalación](#instalación) · [Ejecución con Docker](#ejecución-con-docker) · [Uso](#uso) · [Estructura](#estructura-del-proyecto) · [ML No-Show Risk Score](#ml-no-show-risk-score-system) · [API](#api-disponible)
+[Descripción](#descripción) · [Funcionalidades](#funcionalidades) · [Instalación](#instalación) · [Ejecución con Docker](#ejecución-con-docker) · [Uso](#uso) · [Estructura](#estructura-del-proyecto) · [ML No-Show Risk Score](#ml-no-show-risk-score-system) · [API](#api-disponible) · [Cambios recientes](#cambios-recientes)
 
 </div>
 
@@ -22,13 +22,7 @@
 
 CliniCita es un proyecto formativo del **SENA** desarrollado para mejorar la administración de citas médicas y reducir el ausentismo. La plataforma centraliza el agendamiento, la consulta de citas, la atención por roles y los recordatorios para ofrecer una experiencia más ordenada a pacientes y personal de salud.
 
-El proyecto combina:
-- **Frontend**: React 18 + Vite + TailwindCSS 4 (carpeta `client/`)
-- **Backend**: Node.js + Express (carpeta `server/`)
-- **Base de datos**: MySQL (scripts en `database/`)
-- **Integración opcional**: WhatsApp (chatbot, recordatorios, priorización por riesgo)
-- **Machine Learning**: FastAPI + XGBoost para predicción de riesgo de inasistencia (no-show)
-- **Chatbot IA**: Google Gemini para clasificar mensajes de confirmaciones, cancelaciones y síntomas de preconsulta
+El proyecto combina un frontend web responsive con un servidor **Node.js + Express**, una base de datos **MySQL**, una integración opcional con **WhatsApp**, y un **servicio de Machine Learning (FastAPI + XGBoost)** para predicción de riesgo de inasistencia (no-show). También incluye un chatbot con Google Gemini para clasificar mensajes relacionados con confirmaciones, cancelaciones y síntomas de preconsulta.
 
 ## Objetivos
 
@@ -73,18 +67,45 @@ El proyecto combina:
 
 ### Automatización y comunicación
 
-- Recordatorios de citas programados (24h y 2h antes) vía WhatsApp.
-- Chatbot WhatsApp para confirmar, cancelar o reprogramar citas, y registrar síntomas de preconsulta.
-- Detección de palabras clave de urgencia para alertar a recepción.
-- Priorización de recordatorios: pacientes con riesgo Crítico/Alto reciben WhatsApp + SMS simulado; Medio/Bajo solo WhatsApp.
+- Recordatorios de citas por WhatsApp mediante `whatsapp-web.js`.
+- **Priorización de recordatorios para pacientes de alto riesgo** basada en el score ML; con WhatsApp habilitado, el servidor puede registrar el canal combinado `WhatsApp+SMS`.
+- Ejecución periódica de recordatorios con `node-cron`.
+- Vinculación de un WhatsApp ya identificado con el número registrado del paciente mediante documento y últimos cuatro dígitos del teléfono.
+- El chatbot solo responde al número registrado del paciente que tiene la cita; los mensajes de números no asociados se ignoran.
+- Clasificación local de mensajes y clasificación/respuesta opcional con Google Gemini.
+- Ficha de preconsulta con síntomas o motivo reportado por el paciente.
 
-### Machine Learning (No-Show Risk Score)
+### Machine Learning - No-Show Risk Score
 
-- Entrenamiento automático con XGBoost en pipeline reproducible.
-- Variables: historial de no-show, cancelaciones, antigüedad, hora del día, día de la semana, especialidad, lead time, edad, género.
-- API de inferencia: score 0–100, percentil, nivel (Crítico/Alto/Medio/Bajo), features principales, versión del modelo.
-- Fallback heurístico en Node.js si el servicio ML no está disponible.
-- Recálculo masivo bajo demanda desde panel de administración.
+- **Modelo XGBoost** entrenado con historial de citas, recordatorios y datos demográficos.
+- **308 pacientes** con scores calculados y almacenados (72 Crítico, 236 Bajo).
+- **AUC = 1.0** en datos de entrenamiento (300 pacientes sintéticos generados).
+- Features principales: `citas_no_show` (0.38), `no_show_ultimos_90d` (0.26), `tasa_no_show_reciente` (0.16).
+- API REST (FastAPI) con endpoints: `/riesgo/{id}`, `/riesgo/batch`, `/train`, `/recalcular-todos`.
+- MLflow para experiment tracking y registro de modelos.
+- Docker Compose orquestado (ML Service, MLflow, MySQL).
+
+## Tecnologías
+
+| Capa | Tecnologías |
+| --- | --- |
+| Frontend | HTML5, CSS3, JavaScript, Bootstrap 5, Bootstrap Icons |
+| Backend | Node.js, Express 5 |
+| ML Service | Python 3.11, FastAPI, XGBoost, scikit-learn, MLflow |
+| Persistencia | MySQL 8.0, `mysql2` (Node), `pymysql` (Python) |
+| Autenticación | Tokens HMAC, `crypto.scryptSync` y control de acceso por rol |
+| Mensajería | `whatsapp-web.js`, `qrcode-terminal`, `node-cron` |
+| IA opcional | Google Gemini mediante `@google/genai` |
+| Contenedores | Docker, Docker Compose |
+
+## Requisitos
+
+- Node.js 18+ y npm.
+- MySQL Server 8.0+ activo.
+- Una base de datos local con permisos para crear tablas.
+- Google Chrome/Chromium disponible si se habilita WhatsApp Web.
+- **Docker y Docker Compose** (para servicio ML).
+- Python 3.11+ (si se ejecuta ML service sin Docker).
 
 ## Instalación
 
@@ -108,16 +129,32 @@ cp .env.example .env   # Crear .env con tus credenciales (ver sección Configura
 ```bash
 # Crear base de datos y tablas (versión oficial versionada)
 mysql -u root -p < database/bd.sql
-
-# Opcional: cargar datos de prueba (solo desarrollo local)
-mysql -u root -p < database/init_local.sql
-# O solo datos de prueba (requiere bd.sql previo)
-mysql -u root -p < database/insert_data.sql
 ```
 
-> **Nota**: `database/init_local.sql` incluye `DROP DATABASE IF EXISTS` — úsalo solo en entorno local de desarrollo. `database/insert_data.sql` solo inserta datos de prueba (sin DROP). Los scripts `write_sql*.py` son auxiliares de migración y no deben ejecutarse directamente en producción.
+La configuración de conexión está en `server/conexion.js` (por defecto: `localhost`, `root`, sin contraseña, BD `clinicitabd`).
 
-### 3. Backend (Node.js + Express)
+### 4. Configura variables de entorno (`.env` en la raíz)
+
+```env
+TOKEN_SECRET=una-clave-larga-y-segura
+ENABLE_WHATSAPP=true
+ENABLE_WHATSAPP_CHATBOT=true
+WHATSAPP_COUNTRY_CODE=57
+WHATSAPP_CONVERSATION_TTL_MS=14400000
+CLINIC_TIMEZONE=America/Bogota
+CLINIC_UTC_OFFSET=-05:00
+DEBUG=false
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-flash-lite
+# ML Service
+ML_SERVICE_URL=http://localhost:8000
+# Opcional: ruta de Chrome si no se encuentra automáticamente
+# PUPPETEER_EXECUTABLE_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
+```
+
+> **Nota**: No subas `.env`, credenciales ni las carpetas de sesión de WhatsApp al repositorio.
+
+### 5. Ejecuta todo el proyecto con Docker (recomendado)
 
 ```bash
 # Desde la raíz del proyecto
@@ -161,10 +198,68 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 Desde la raíz del proyecto:
 
 ```bash
-# 1. Build del frontend (genera ../public/index.html + ../public/assets/*)
-cd client && npm run build && cd ..
+git clone <URL_DEL_REPOSITORIO>
+cd "CLINICITA NODE.JS"
+cp .env.docker.example .env
+docker compose up -d --build
+docker compose run --rm ml-service python scripts/generate_training_data.py 300
+docker compose run --rm ml-service python train.py
+docker compose restart ml-service
+```
 
-# 2. Iniciar backend (sirve API + frontend estático + SPA fallback)
+Abre `http://localhost:3000`. Para probar los endpoints sin usar `curl`, abre `http://localhost:3000/test-panel.html`.
+
+### Operaciones habituales
+
+```bash
+# Ver estado de los servicios
+docker compose ps
+
+# Ver logs
+docker compose logs -f backend
+docker compose logs -f ml-service
+
+# Detener sin borrar datos
+docker compose down
+
+# Volver a iniciar los contenedores
+docker compose up -d
+
+# Reiniciar completamente la base, MLflow y el modelo
+docker compose down -v
+docker compose up -d --build
+```
+
+`docker compose down -v` elimina los volúmenes `mysql_data`, `mlflow_data` y `ml_models`; úsalo únicamente cuando quieras comenzar desde cero. Después de borrarlos debes ejecutar nuevamente el generador y el entrenamiento.
+
+### Configuración Docker
+
+Las variables se configuran en `.env`, creado a partir de `.env.docker.example`:
+
+| Variable | Uso | Valor habitual |
+| --- | --- | --- |
+| `MYSQL_ROOT_PASSWORD` | Contraseña de MySQL | `clinicita123` |
+| `TOKEN_SECRET` | Firma de tokens de sesión | Cambiar en producción |
+| `BACKEND_HOST_PORT` | Puerto del backend | `3000` |
+| `ML_HOST_PORT` | Puerto público del servicio ML | `8000` |
+| `MLFLOW_HOST_PORT` | Puerto público de MLflow | `5000` |
+| `MYSQL_HOST_PORT` | Puerto público de MySQL | `3307` |
+| `ENABLE_WHATSAPP` | Activa WhatsApp | `false` |
+| `GEMINI_API_KEY` | Clave opcional de Gemini | Vacía |
+
+El backend se conecta internamente a `http://ml-service:8000`; desde el navegador se usa `http://localhost:8000`. Por eso no se debe cambiar `ML_SERVICE_URL` a `localhost` dentro del contenedor backend.
+
+Para borrar también los datos persistidos y empezar desde cero:
+
+```bash
+docker compose down -v
+```
+
+## Uso
+
+### Inicia el servidor Node.js
+
+```bash
 node server/server.js
 # http://localhost:3000 → app React
 # http://localhost:3000/api/* → API REST
@@ -181,38 +276,32 @@ node server/server.js
 Crea un archivo `.env` en la raíz con (valores de ejemplo):
 
 ```env
-# Base de datos
-DB_HOST=localhost
-DB_USER=root
-DB_PASSWORD=tu_password
-DB_NAME=clinicitabd
-DB_PORT=3306
-
-# JWT
-JWT_SECRET=clave_secreta_muy_larga_y_aleatoria
-JWT_EXPIRES_IN=8h
-
-# Servidor
-PORT=3000
-NODE_ENV=development
-CORS_ORIGIN=http://localhost:5173
-
-# ML Service (opcional)
-ML_SERVICE_URL=http://localhost:8000
-
-# WhatsApp (opcional)
-WHATSAPP_ENABLED=false
-WHATSAPP_SESSION_PATH=.wwebjs_auth
-
-# Recordatorios
-REMINDER_HOURS_BEFORE=24
-REMINDER_SECOND_HOURS=2
-
-# Zona horaria
-TZ=America/Bogota
+ENABLE_WHATSAPP=true
 ```
 
-> **Seguridad**: Nunca commitees `.env`, `.wwebjs_auth/`, `.wwebjs_cache/`, `node_modules/`, `client/dist/`, `client/node_modules/`.
+Al iniciar el servidor aparecerá un código QR en la terminal. Escanéalo desde WhatsApp para vincular la sesión.
+
+El chatbot se activa por separado:
+
+```env
+ENABLE_WHATSAPP_CHATBOT=true
+```
+
+La clave `GEMINI_API_KEY` es opcional. Si no está configurada, el sistema utiliza un clasificador local.
+
+### Credenciales de demostración
+
+El servidor crea estos usuarios automáticamente al iniciar, si todavía no existen:
+
+| Rol | Correo | Contraseña |
+| --- | --- | --- |
+| Paciente | `paciente@clinicita.com` | `paciente123` |
+| Médico | `medico@clinicita.com` | `medico123` |
+| Recepcionista | `recepcion@clinicita.com` | `recepcion123` |
+| Administrador | `admin@clinicita.com` | `admin123` |
+
+Estas cuentas son únicamente para desarrollo y demostración. Deben cambiarse o eliminarse antes de usar el sistema en un entorno real.
+
 ## Estructura del proyecto
 
 ```
@@ -264,86 +353,67 @@ CLINICITA-NODE.JS/
 └── README.md
 ```
 
-## Cómo iniciar cada parte
+## Modelo de datos
 
-| Componente | Comando | Puerto por defecto |
-|------------|---------|-------------------|
-| Backend (Node.js) | `node server/server.js` | 3000 |
-| Frontend Dev (Vite) | `cd client && npm run dev` | 5173 |
-| Frontend Build | `cd client && npm run build` | `client/dist/` |
-| ML Service (FastAPI) | `cd ml-service && uvicorn app.main:app --port 8000` | 8000 |
-| MLflow UI | `cd ml-service && mlflow ui --port 5000` | 5000 |
-| Docker completo | `docker-compose up --build` | 3000, 3306, 8000, 5000 |
+La base de datos `clinicitabd` incluye las entidades principales del proceso de atención:
 
-## Roles y funcionalidades implementadas en el Frontend
+- `usuarios`: cuentas, roles, estado y relación con paciente o médico.
+- `pacientes`: datos de contacto, documento y vinculación con WhatsApp.
+- `medicos`: profesionales y especialidades.
+- `citas`: fecha, hora, motivo y estado de la atención.
+- `horarios`: disponibilidad de médicos por sede y día de la semana (valida citas).
+- `lista_espera`: pacientes pendientes con especialidad y prioridad.
+- `recordatorios`: canal (`WhatsApp`, `SMS` o `Email`), fecha y estado de entrega.
+- `fichas_preconsulta`: síntomas registrados para una cita.
+- `paciente_riesgo_no_show`: **score ML (0-100), percentil, nivel (Crítico/Alto/Medio/Bajo), features JSON, versión modelo**.
 
-| Rol | Rutas | Páginas principales |
-|-----|-------|---------------------|
-| **Paciente** | `/paciente/*` | Dashboard, Citas, Agendar, Lista Espera, Preconsulta, Perfil |
-| **Médico** | `/medico/*` | Dashboard, Agenda, Citas, Pacientes |
-| **Recepcionista** | `/recepcionista/*` | Dashboard, Citas, Pacientes, Horarios |
-| **Administrador** | `/admin/*` | Dashboard, Usuarios, Médicos, Sedes, Reportes |
+También se incluyen llaves foráneas, índices, triggers para recordatorios y lista de espera, además de los procedimientos `RegistrarCita`, `ConsultarCitasPaciente`, `ObtenerHorariosDisponibles` y `GenerarSlotsDisponibles`.
 
-- **Navegación unificada**: `Header.jsx` + `Sidebar.jsx` (responsive, colapsable) dentro de `RoleLayout.jsx`.
-- **Componentes compartidos**: `StatCard`, `QuickAction` en `DashboardComponents.jsx`; animaciones en `AnimatedComponents.jsx`.
-- **Utilidades compartidas**: `getColombiaDate()` en `dateUtils.js` (zona horaria Colombia UTC-5).
-- **Rutas protegidas**: `ProtectedRoute` por rol + lazy loading en `AppRoutes.jsx`.
+## API disponible
 
-## Limitaciones conocidas
+Las rutas protegidas utilizan un token Bearer generado durante el inicio de sesión.
 
-1. **Frontend**: `client/` está en `.gitignore` (línea 11) — es una aplicación nueva no versionada aún.
-2. **Lint**: 1 warning en `AuthContext.jsx` (exporta hook `useAuth` junto al componente `AuthProvider`; rompe Fast Refresh en dev, no afecta build ni producción).
-3. **Backend**: `server/services/ml-client.js` usa fallback heurístico si el servicio ML no está disponible (requiere `ML_SERVICE_URL`).
-4. **WhatsApp**: Integración opcional; requiere escaneo QR manual en primera ejecución; no funciona en entornos headless sin configuración adicional.
-5. **Base de datos**: `database/init_local.sql` contiene `DROP DATABASE IF EXISTS` — **no usar en producción**. Usar `bd.sql` para esquema y `insert_data.sql` solo para datos de prueba.
-6. **Scripts auxiliares**: `database/write_sql*.py` son herramientas de migración manual, no forman parte del despliegue automático.
-7. **ML Service**: Entrenamiento y serving son opcionales; el backend funciona con fallback heurístico si no está disponible.
-8. **Docker**: `docker-compose.yml` orquesta todo, pero requiere `.env` válido y puertos libres.
+### Autenticación y usuarios
 
-## API disponible (resumen)
+| Método | Ruta | Descripción |
+| --- | --- | --- |
+| `POST` | `/api/auth/login` | Inicia sesión por correo, contraseña y rol |
+| `POST` | `/api/auth/registro` | Registra un nuevo paciente |
+| `GET` | `/api/auth/me` | Consulta el usuario autenticado |
 
-### Autenticación
-- `POST /api/auth/login` — Login, retorna JWT
-- `POST /api/auth/register` — Registro paciente
-- `GET /api/auth/me` — Usuario actual (requiere token)
+### Catálogo
 
-### Pacientes
-- `GET /api/pacientes` — Listar (admin/recepción)
-- `GET /api/pacientes/:id` — Detalle
-- `POST /api/pacientes` — Crear
-- `PUT /api/pacientes/:id` — Actualizar
-- `GET /api/pacientes/:id/riesgo` — Score ML no-show
-
-### Médicos
-- `GET /api/medicos` — Listar
-- `GET /api/medicos/:id/horarios` — Horarios por médico
+| Método | Ruta | Descripción |
+| --- | --- | --- |
+| `GET` | `/api/especialidades` | Lista especialidades disponibles |
+| `GET` | `/api/medicos` | Lista médicos, con filtro opcional por especialidad |
+| `GET` | `/api/horarios` | Consulta horarios libres de un médico |
 
 ### Citas
-- `GET /api/citas` — Listar con filtros
-- `POST /api/citas` — Agendar
-- `PUT /api/citas/:id` — Actualizar estado
-- `DELETE /api/citas/:id` — Cancelar
-- `GET /api/citas/disponibilidad` — Slots libres
 
-### Lista de espera
-- `GET /api/lista-espera` — Listar
-- `POST /api/lista-espera` — Agregar
-- `PUT /api/lista-espera/:id` — Actualizar prioridad/estado
-- `POST /api/lista-espera/reasignar/:citaId` — Reasignar cupo liberado
+| Método | Ruta | Descripción |
+| --- | --- | --- |
+| `POST` | `/api/citas` | Crea una cita para el paciente autenticado |
+| `GET` | `/api/citas` | Lista las citas del paciente autenticado |
 
-### Recordatorios / WhatsApp
-- `POST /api/recordatorios/procesar` — Procesar recordatorios pendientes
-- `POST /api/whatsapp/webhook` — Webhook entrante (Twilio/Meta)
+### ML No-Show Risk Score
 
-### Administración
-- `GET /api/admin/estadisticas` — KPIs dashboard
-- `POST /api/admin/recalcular-riesgos` — Recálculo masivo scores ML
-- `GET /api/reportes/ausentismo` — Reporte ausentismo
+| Método | Ruta | Descripción | Roles |
+| --- | --- | --- | --- |
+| `GET` | `/api/pacientes/me/riesgo` | Riesgo del paciente autenticado | paciente |
+| `GET` | `/api/pacientes/:id/riesgo` | Riesgo de un paciente por ID | admin, recepcionista, medico |
+| `POST` | `/api/pacientes/riesgo/batch` | Riesgos en lote (máx 100 IDs) | admin, recepcionista |
+| `POST` | `/api/pacientes/riesgo/recalcular-todos` | Dispara recálculo masivo en background | admin |
 
-### ML Service (FastAPI, puerto 8000)
-- `GET /riesgo/:pacienteId` — Score individual
-- `POST /riesgo/batch` — Scores en lote
-- `POST /recalcular-todos` — Reentrenamiento + recálculo masivo
+### ML Service API (FastAPI - puerto 8000)
+
+| Método | Ruta | Descripción |
+| --- | --- | --- |
+| `GET` | `/health` | Health check + modelo cargado |
+| `GET` | `/riesgo/{paciente_id}` | Score individual |
+| `POST` | `/riesgo/batch` | Scores en lote (máx 100) |
+| `POST` | `/train` | Reentrenamiento en background |
+| `POST` | `/recalcular-todos` | Recalcula y guarda scores de todos los pacientes |
 
 ## ML No-Show Risk Score System
 
@@ -352,12 +422,278 @@ Ver sección detallada en el README original (entrenamiento, features, inferenci
 ## Ejecución con Docker
 
 ```bash
-# Requiere .env en la raíz
-docker-compose up --build -d
-# Servicios: backend:3000, mysql:3306, ml-service:8000, mlflow:5000
-docker-compose logs -f backend
-docker-compose down -v   # Limpia volúmenes (borra BD)
+npm run lint          # ESLint para el código JavaScript
+npm run format        # Formatea la configuración de calidad
+npm run format:check  # Comprueba el formato
+npm run check:node    # Verifica sintaxis Node.js
+npm run check:python  # Verifica sintaxis Python
+npm test              # Sintaxis y smoke test del backend
+npm run build         # Valida Compose y construye imágenes Docker
+npm run check         # Ejecuta toda la suite anterior
 ```
+
+La suite recomendada antes de un commit es `npm run check`.
+
+---
+
+## Guía de Pruebas (Paso a Paso)
+
+### Prerrequisitos / Configuración
+
+1. **Base de datos MySQL** corriendo con esquema `clinicitabd` (ejecutar `database/bd.sql`)
+2. **Variables de entorno** en `.env` (ver sección Instalación)
+3. **Dependencias Node.js**: `npm install`
+4. **Servicio ML** (opción A: Docker - recomendado; opción B: Python local)
+
+#### Opción A: Con Docker (Recomendado)
+
+```bash
+cd ml-service
+cp .env.example .env
+# Asegurar MYSQL_ROOT_PASSWORD=clinicita123 en .env
+docker-compose up -d
+
+# Verificar contenedores
+docker ps
+# Deben aparecer: clinicita-ml, clinicita-mlflow, clinicita-mysql-ml
+
+# Generar datos de entrenamiento (300 pacientes)
+docker run --rm --network clinicita-network \
+  -e MYSQL_ROOT_PASSWORD=clinicita123 \
+  -e DB_HOST=mysql \
+  clinicita-ml python scripts/generate_training_data.py 300
+
+# Entrenar modelo
+docker run --rm --network clinicita-network \
+  -v clinicita_ml_models:/models \
+  -e MYSQL_ROOT_PASSWORD=clinicita123 \
+  -e MLFLOW_TRACKING_URI=http://mlflow:5000 \
+  -e DB_HOST=mysql \
+  clinicita-ml python train.py
+```
+
+#### Opción B: Python Local (sin Docker)
+
+```bash
+cd ml-service
+pip install -r requirements.txt
+
+# Asegurar MySQL local corriendo en localhost:3306 con BD clinicitabd
+# Configurar .env con DB_HOST=localhost, DB_PASSWORD=tu_password
+
+python scripts/generate_training_data.py 300
+python train.py
+```
+
+### Comandos de Ejecución
+
+```bash
+# Terminal 1: ML Service (si no usa Docker)
+cd ml-service
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# Terminal 2: Servidor Node.js
+cd "CLINICITA NODE.JS"
+node server/server.js
+
+# Terminal 3 (opcional): MLflow UI
+# Abrir http://localhost:5000 en navegador
+```
+
+### Flujo de Prueba / Casos de Uso
+
+#### 1. Verificar ML Service Health
+
+```bash
+curl http://localhost:8000/health
+```
+
+**Resultado esperado:**
+```json
+{
+  "status": "healthy",
+  "model_loaded": true,
+  "model_version": "abc12345"
+}
+```
+
+#### 2. Verificar predicción individual
+
+```bash
+curl http://localhost:8000/riesgo/1
+```
+
+**Resultado esperado:**
+```json
+{
+  "paciente_id": 1,
+  "score": 85.50,
+  "percentil": 85,
+  "nivel_riesgo": "Crítico",
+  "features_principales": {
+    "citas_no_show": 5,
+    "no_show_ultimos_90d": 2,
+    "tasa_no_show_reciente": 0.4
+  },
+  "model_version": "abc12345",
+  "calculado_en": "2026-10-26T..."
+}
+```
+
+#### 3. Verificar predicción en batch (ML Service directo)
+
+```bash
+curl -X POST http://localhost:8000/riesgo/batch \
+  -H "Content-Type: application/json" \
+  -d '{"paciente_ids": [1, 2, 3, 4, 5]}'
+```
+
+#### 4. Verificar endpoint Node.js - Riesgo paciente autenticado
+
+```bash
+# Primero login
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"correo": "paciente@clinicita.com", "clave": "paciente123", "rol": "paciente"}'
+
+# Usar token devuelto
+curl -H "Authorization: Bearer <TOKEN>" \
+  http://localhost:3000/api/pacientes/me/riesgo
+```
+
+#### 5. Verificar endpoint Node.js - Batch (admin/recepcionista)
+
+```bash
+# Login como recepcionista
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"correo": "recepcion@clinicita.com", "clave": "recepcion123", "rol": "recepcionista"}'
+
+# Batch request
+curl -X POST http://localhost:3000/api/pacientes/riesgo/batch \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"paciente_ids": [1, 2, 3, 10, 20, 50, 100]}'
+```
+
+#### 6. Verificar recálculo masivo (solo admin)
+
+```bash
+# Login como admin
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"correo": "admin@clinicita.com", "clave": "admin123", "rol": "administrador"}'
+
+# Disparar recálculo
+curl -X POST http://localhost:3000/api/pacientes/riesgo/recalcular-todos \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+**Resultado esperado:**
+```json
+{
+  "message": "Recálculo masivo iniciado",
+  "status": "started"
+}
+```
+
+> El recálculo se ejecuta en background. Verificar logs del ML service: `docker logs clinicita-ml -f`
+
+#### 7. Verificar Frontend - Coloreo de riesgo
+
+1. Abrir [http://localhost:3000/roles/recepcionista/citas.html](http://localhost:3000/roles/recepcionista/citas.html)
+2. Iniciar sesión como recepcionista (`recepcion@clinicita.com` / `recepcion123`)
+3. Verificar que las filas de la tabla tienen colores de fondo según riesgo:
+   - 🔴 **Rojo** (`.riesgo-critico`): Score ≥ 70
+   - 🟠 **Naranja** (`.riesgo-alto`): Score 50-69
+   - 🟡 **Amarillo** (`.riesgo-medio`): Score 30-49
+   - 🟢 **Verde** (`.riesgo-bajo`): Score < 30
+4. Badge con nivel de riesgo visible en cada fila
+
+5. Repetir para médico: [http://localhost:3000/roles/medico/agenda.html](http://localhost:3000/roles/medico/agenda.html)
+
+#### 8. Verificar recordatorios priorizados por riesgo
+
+1. Configurar `ENABLE_WHATSAPP=true` en `.env`
+2. Reiniciar servidor Node.js
+3. Escanear QR de WhatsApp Web
+4. Trigger recordatorios (esperar cron o llamar endpoint interno)
+5. Verificar en logs y en la base de datos el canal registrado para pacientes Crítico/Alto. Si la migración automática del servidor está activa, puede aparecer `WhatsApp+SMS`.
+6. Verificar en BD:
+   ```sql
+   SELECT canal_envio, estado_entrega, COUNT(*) 
+   FROM recordatorios 
+   GROUP BY canal_envio, estado_entrega;
+   ```
+
+#### 9. Verificar BD - Scores persistidos
+
+```sql
+SELECT 
+  pr.nivel_riesgo,
+  COUNT(*) as total,
+  AVG(pr.score) as score_promedio,
+  MIN(pr.score) as min_score,
+  MAX(pr.score) as max_score
+FROM paciente_riesgo_no_show pr
+GROUP BY pr.nivel_riesgo
+ORDER BY FIELD(pr.nivel_riesgo, 'Crítico', 'Alto', 'Medio', 'Bajo');
+```
+
+**Resultado esperado aprox:**
+| nivel_riesgo | total | score_promedio | min_score | max_score |
+|--------------|-------|----------------|-----------|-----------|
+| Crítico      | 72    | ~85            | 70        | 98        |
+| Alto         | 0     | -              | -         | -         |
+| Medio        | 0     | -              | -         | -         |
+| Bajo         | 236   | ~10            | 2         | 29        |
+
+> Nota: Con datos sintéticos actuales, la separación es bimodal (Crítico/Bajo). Con datos reales aparecerán Alto/Medio.
+
+#### 10. Verificar MLflow
+
+Abrir [http://localhost:5000](http://localhost:5000) → Experimento `clinicita-no-show-risk` → Último run → Ver métricas (AUC, feature_importance.csv artifact).
+
+---
+
+## Estado del proyecto
+
+El flujo de autenticación, registro de pacientes, consulta de disponibilidad y agendamiento de citas está conectado al backend y MySQL. La interfaz incluye los paneles de los cuatro roles y las pantallas principales del sistema.
+
+**Sistema ML No-Show Risk Score: OPERATIVO** ✅
+- Entrenamiento automático en Docker
+- API de inferencia funcional
+- Integración completa Node.js ↔ FastAPI
+- Frontend con visualización de riesgo
+- WhatsApp dual-channel para alto riesgo
+- Recálculo masivo bajo demanda
+
+Algunas vistas administrativas, médicas y de recepción mantienen marcadores `TODO` para conectar sus operaciones de lectura y actualización con nuevos endpoints.
+
+---
+
+## Próximos Pasos (Roadmap)
+
+### Fase 2: Mejora de Arquitectura del Modelo (Prioridad: MEDIA)
+- Feature engineering: ventanas rodantes (30/60/90 días), patrones estacionales, features de interacción
+- Re-habilitar Optuna para optimización de hiperparámetros
+- Probar algoritmos alternativos: LightGBM, CatBoost, Regresión Logística
+- Validación cruzada robusta con dataset expandido
+- Re-habilitar calibración Platt (ahora hay datos suficientes)
+
+### Fase 3: Hardening de Producción (Prioridad: MEDIA)
+- Versionado de modelos y A/B testing en serving
+- Detección de deriva (data drift) en features
+- Reentrenamiento programado (semanal/mensual)
+- MLflow: almacenamiento de artefactos compartido (MinIO/S3)
+- Monitoreo de latencia de predicción y alertas de performance
+
+### Fase 4: UX Frontend (Prioridad: BAJA)
+- Tooltips con contribución SHAP por feature
+- Historial de riesgo por paciente (gráfico temporal)
+- Botón "Recalcular riesgo" por fila en tablas
+
+---
 
 ## Contexto académico
 
