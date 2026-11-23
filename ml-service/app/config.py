@@ -1,4 +1,6 @@
 """Configuración del servicio ML"""
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
 from pydantic_settings import SettingsConfigDict
 from typing import Optional
@@ -6,7 +8,7 @@ from typing import Optional
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=Path(__file__).resolve().parent.parent.parent / ".env",
         case_sensitive=False,
         extra="ignore",
         protected_namespaces=(),
@@ -28,5 +30,8 @@ class Settings(BaseSettings):
 
     # Model
     model_dir: str = "/models"
+
+    # Seguridad interna: clave compartida con el backend para autenticar peticiones X-API-Key
+    ml_service_secret_key: Optional[str] = None
 
 settings = Settings()
