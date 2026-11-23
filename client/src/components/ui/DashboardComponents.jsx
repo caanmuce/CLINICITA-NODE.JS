@@ -59,6 +59,7 @@ export const QuickAction = ({ label, href, icon: Icon, color, index }) => (
     <AnimatedCard
       as="a"
       href={href}
+      bg=""
       className={`flex flex-col items-center gap-3 p-4 rounded-xl text-white ${color} cursor-pointer`}
     >
       <div className="p-3 bg-white/20 rounded-lg">

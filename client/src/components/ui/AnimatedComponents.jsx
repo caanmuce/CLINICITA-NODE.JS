@@ -227,13 +227,14 @@ export const AnimatedModal = ({
 export const AnimatedCard = ({
   children,
   className = "",
+  bg = "",
   hover = true,
   onClick,
   as: Component = "div",
   ...props
 }) => (
   <motion.div
-    className={`${className} bg-white rounded-xl border border-gray-200 ${hover ? "hover-lift cursor-pointer" : ""}`}
+    className={`${className} ${bg} rounded-xl border border-gray-200 ${hover ? "hover-lift cursor-pointer" : ""}`}
     initial={{ opacity: 0, y: 10 }}
     animate={{ opacity: 1, y: 0 }}
     whileHover={

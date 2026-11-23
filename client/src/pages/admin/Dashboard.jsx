@@ -248,7 +248,7 @@ export const AdminDashboard = () => {
         </FadeIn>
 
         <FadeIn delay={0.2}>
-          <AnimatedCard className="p-6">
+          <AnimatedCard className="p-6 bg-white">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                 <TrendingUp className="h-5 w-5 text-teal-600" />

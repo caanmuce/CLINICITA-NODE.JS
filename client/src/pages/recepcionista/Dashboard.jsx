@@ -177,25 +177,25 @@ export const RecepcionistaDashboard = () => {
       label: "Agendar cita",
       href: "/recepcionista/citas",
       icon: PlusCircle,
-      color: "bg-teal-600",
+      color: "bg-teal-600 hover:bg-teal-700",
     },
     {
       label: "Gestion de citas",
       href: "/recepcionista/citas",
       icon: Calendar,
-      color: "bg-teal-600",
+      color: "bg-teal-600 hover:bg-teal-700",
     },
     {
       label: "Pacientes",
       href: "/recepcionista/pacientes",
       icon: Users,
-      color: "bg-teal-600",
+      color: "bg-teal-600 hover:bg-teal-700",
     },
     {
       label: "Horarios",
       href: "/recepcionista/horarios",
       icon: Clock,
-      color: "bg-purple-600",
+      color: "bg-purple-600 hover:bg-purple-700",
     },
   ];
 
@@ -244,7 +244,7 @@ export const RecepcionistaDashboard = () => {
         </FadeIn>
 
         <FadeIn delay={0.2}>
-          <AnimatedCard className="p-6">
+          <AnimatedCard className="p-6 bg-white">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                 <Calendar className="h-5 w-5 text-teal-600" />
