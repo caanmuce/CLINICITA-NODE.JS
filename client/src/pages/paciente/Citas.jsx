@@ -12,6 +12,8 @@ import {
   AlertCircle,
   CheckCircle,
   Trash2,
+  Edit,
+  RefreshCw,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { citasApi } from "../../api/citas";
@@ -120,6 +122,11 @@ export const PacienteCitas = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [estadoFilter, setEstadoFilter] = useState("");
   const [cancelandoId, setCancelandoId] = useState(null);
+  const [reprogramandoId, setReprogramandoId] = useState(null);
+  const [reprogramarCita, setReprogramarCita] = useState(null);
+  const [reprogramarFecha, setReprogramarFecha] = useState("");
+  const [reprogramarHora, setReprogramarHora] = useState("");
+  const [reprogramarMotivo, setReprogramarMotivo] = useState("");
 
   const cargarCitas = async () => {
     setLoading(true);
@@ -164,6 +171,47 @@ export const PacienteCitas = () => {
       alert(msg);
     } finally {
       setCancelandoId(null);
+    }
+  };
+
+  const abrirReprogramar = (cita) => {
+    setReprogramarCita(cita);
+    setReprogramarFecha("");
+    setReprogramarHora("");
+    setReprogramarMotivo("");
+  };
+
+  const cerrarReprogramar = () => {
+    setReprogramarCita(null);
+    setReprogramarFecha("");
+    setReprogramarHora("");
+    setReprogramarMotivo("");
+  };
+
+  const handleReprogramar = async (e) => {
+    e.preventDefault();
+    if (!reprogramarCita) return;
+    if (!reprogramarFecha || !reprogramarHora) {
+      alert("Por favor selecciona fecha y hora");
+      return;
+    }
+    setReprogramandoId(reprogramarCita.cita_id || reprogramarCita.id);
+    try {
+      await citasApi.reprogramar(reprogramarCita.cita_id || reprogramarCita.id, {
+        fecha: reprogramarFecha,
+        hora: reprogramarHora,
+        motivo_cambio: reprogramarMotivo || "Reprogramada por el paciente",
+        observaciones: "",
+      });
+      cerrarReprogramar();
+      await cargarCitas();
+    } catch (err) {
+      const msg =
+        err.response?.data?.mensaje ||
+        "No se pudo reprogramar la cita. Intenta nuevamente.";
+      alert(msg);
+    } finally {
+      setReprogramandoId(null);
     }
   };
 
@@ -363,20 +411,35 @@ export const PacienteCitas = () => {
                     </td>
                     <td className="px-4 py-4">
                       <div className="flex items-center gap-2">
-                        {["pendiente", "confirmada"].includes(cita.estado) && (
-                          <button
-                            onClick={() => handleCancelar(cita.id)}
-                            disabled={cancelandoId === cita.id}
-                            className="flex items-center gap-1 px-3 py-1.5 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="Cancelar cita"
-                          >
-                            {cancelandoId === cita.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-4 w-4" />
-                            )}
-                            <span className="hidden sm:inline">Cancelar</span>
-                          </button>
+                        {["Pendiente", "Confirmada"].includes(cita.estado) && (
+                          <>
+                            <button
+                              onClick={() => handleCancelar(cita.id)}
+                              disabled={cancelandoId === cita.id || reprogramandoId === cita.id}
+                              className="flex items-center gap-1 px-3 py-1.5 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Cancelar cita"
+                            >
+                              {cancelandoId === cita.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                              <span className="hidden sm:inline">Cancelar</span>
+                            </button>
+                            <button
+                              onClick={() => abrirReprogramar(cita)}
+                              disabled={reprogramandoId === cita.id || cancelandoId === cita.id}
+                              className="flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Reprogramar cita"
+                            >
+                              {reprogramandoId === cita.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <RefreshCw className="h-4 w-4" />
+                              )}
+                              <span className="hidden sm:inline">Reprogramar</span>
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>
@@ -485,6 +548,113 @@ export const PacienteCitas = () => {
             No tienes citas agendadas aún. Haz clic en 'Agendar nueva' para
             programar tu primera cita.
           </p>
+        </div>
+      )}
+
+      {/* Modal reprogramar cita */}
+      {reprogramarCita && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          onClick={cerrarReprogramar}
+        >
+          <div
+            className="bg-white rounded-xl border border-gray-200 w-full max-w-md p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                <RefreshCw className="h-5 w-5 text-teal-600" />
+                Reprogramar cita
+              </h2>
+              <button
+                onClick={cerrarReprogramar}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <XCircle className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleReprogramar} className="space-y-5">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Cita actual
+                </label>
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <p className="text-sm text-gray-900 font-medium">
+                    {formatDate(reprogramarCita.fecha)}{" "}
+                    {reprogramarCita.hora ? formatTime(reprogramarCita.hora) : ""}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {reprogramarCita.medico || "Médico"} •{" "}
+                    {reprogramarCita.especialidad || "Especialidad"}
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Nueva fecha *
+                </label>
+                <input
+                  type="date"
+                  value={reprogramarFecha}
+                  onChange={(e) => setReprogramarFecha(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Nueva hora *
+                </label>
+                <input
+                  type="time"
+                  value={reprogramarHora}
+                  onChange={(e) => setReprogramarHora(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Motivo del cambio *
+                </label>
+                <textarea
+                  value={reprogramarMotivo}
+                  onChange={(e) => setReprogramarMotivo(e.target.value)}
+                  rows={3}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                  placeholder="¿Por qué reprogramas tu cita?"
+                />
+              </div>
+
+              <div className="pt-4 border-t border-gray-200 flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={cerrarReprogramar}
+                  disabled={reprogramandoId === reprogramarCita.cita_id || reprogramandoId === reprogramarCita.id}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={reprogramandoId === reprogramarCita.cita_id || reprogramandoId === reprogramarCita.id}
+                  className="px-6 py-2 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 disabled:opacity-60 transition-colors"
+                >
+                  {reprogramandoId === reprogramarCita.cita_id ||
+                  reprogramandoId === reprogramarCita.id ? (
+                    <Loader2 className="animate-spin h-4 w-4" />
+                  ) : (
+                    "Reprogramar"
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

@@ -33,11 +33,16 @@ import { RecepcionistaDashboard } from "../pages/recepcionista/Dashboard";
 import { RecepcionistaCitas } from "../pages/recepcionista/Citas";
 import { RecepcionistaPacientes } from "../pages/recepcionista/Pacientes";
 import { RecepcionistaHorarios } from "../pages/recepcionista/Horarios";
+import { RecepcionistaRecordatorios } from "../pages/recepcionista/Recordatorios";
 import { AdminDashboard } from "../pages/admin/Dashboard";
 import { AdminUsuarios } from "../pages/admin/Usuarios";
+import { AdminUsuariosNuevo } from "../pages/admin/UsuariosNuevo";
 import { AdminMedicos } from "../pages/admin/Medicos";
 import { AdminSedes } from "../pages/admin/Sedes";
 import { AdminReportes } from "../pages/admin/Reportes";
+import { AdminListaEspera } from "../pages/admin/ListaEspera";
+import { AdminEspecialidades } from "../pages/admin/Especialidades";
+import { AdminHorarios } from "../pages/admin/Horarios";
 function AppRoutes() {
   const { user, loading, isAuthenticated } = useAuth();
 
@@ -98,6 +103,7 @@ function AppRoutes() {
           <Route path="recepcionista/citas" element={<RecepcionistaCitas />} />
           <Route path="recepcionista/pacientes" element={<RecepcionistaPacientes />} />
           <Route path="recepcionista/horarios" element={<RecepcionistaHorarios />} />
+          <Route path="recepcionista/recordatorios" element={<RecepcionistaRecordatorios />} />
         </Route>
 
         {/* ADMINISTRADOR routes */}
@@ -111,9 +117,13 @@ function AppRoutes() {
           <Route path="admin" element={<Navigate to="/admin/dashboard" replace />} />
           <Route path="admin/dashboard" element={<AdminDashboard />} />
           <Route path="admin/usuarios" element={<AdminUsuarios />} />
+          <Route path="admin/usuarios/nuevo" element={<AdminUsuariosNuevo />} />
           <Route path="admin/medicos" element={<AdminMedicos />} />
           <Route path="admin/sedes" element={<AdminSedes />} />
           <Route path="admin/reportes" element={<AdminReportes />} />
+          <Route path="admin/lista-espera" element={<AdminListaEspera />} />
+          <Route path="admin/especialidades" element={<AdminEspecialidades />} />
+          <Route path="admin/horarios" element={<AdminHorarios />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

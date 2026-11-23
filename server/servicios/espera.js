@@ -80,13 +80,12 @@ async function enviarNotificacionOferta(client, oferta) {
 }
 
 /** Crea una oferta temporal para el siguiente paciente compatible con el cupo liberado. */
-async function reasignarCupoListaEspera(db, cita, client = null) {
+async function reasignarCupoListaEspera(db, cita, client = null, queryTx = null) {
     if (!db || !cita?.medico_id || !cita?.fecha_cita || !cita?.hora_cita) {
         return { creada: false, motivo: "Datos del cupo incompletos" };
     }
 
-    try {
-        const oferta = await conTransaccion(db, async (query) => {
+    const ejecutar = async (query) => {
             const fecha = fechaSQL(cita.fecha_cita);
             const hora = horaSQL(cita.hora_cita);
             const instanteCupo = new Date(`${fecha}T${hora}${process.env.CLINIC_UTC_OFFSET || "-05:00"}`);
@@ -187,8 +186,17 @@ async function reasignarCupoListaEspera(db, cita, client = null) {
                 hora_cita: hora,
                 especialidad
             };
-        });
+        };
 
+    if (queryTx) {
+        const oferta = await ejecutar(queryTx);
+        if (!oferta) return { creada: false, motivo: "No hay pacientes compatibles o el horario ya tiene una oferta" };
+        const notificada = await enviarNotificacionOferta(client, oferta);
+        return { creada: true, oferta_id: oferta.oferta_id, notificada };
+    }
+
+    try {
+        const oferta = await conTransaccion(db, ejecutar);
         if (!oferta) return { creada: false, motivo: "No hay pacientes compatibles o el horario ya tiene una oferta" };
         const notificada = await enviarNotificacionOferta(client, oferta);
         return { creada: true, oferta_id: oferta.oferta_id, notificada };
@@ -205,7 +213,6 @@ async function responderOfertaListaEspera(db, { ofertaId, pacienteId = null, dec
         return { ok: false, status: 400, mensaje: "Respuesta de oferta no válida" };
     }
 
-    let cupoParaSiguiente = null;
     let resultado;
     try {
         resultado = await conTransaccion(db, async (query) => {
@@ -236,7 +243,7 @@ async function responderOfertaListaEspera(db, { ofertaId, pacienteId = null, dec
             if (estaVencida || accion === "EXPIRAR") {
                 await query("UPDATE lista_espera_ofertas SET estado = 'Expirada', fecha_respuesta = NOW() WHERE oferta_id = ? AND estado = 'Pendiente'", [oferta.oferta_id]);
                 await query("UPDATE lista_espera SET estado_espera = 'Activo' WHERE espera_id = ? AND estado_espera = 'Ofertado'", [oferta.espera_id]);
-                cupoParaSiguiente = cupo;
+                await reasignarCupoListaEspera(db, cupo, client, query);
                 return { ok: false, status: 410, mensaje: "La oferta venció. El turno se ofrecerá al siguiente paciente compatible." };
             }
 
@@ -244,7 +251,7 @@ async function responderOfertaListaEspera(db, { ofertaId, pacienteId = null, dec
                 const estadoOferta = accion === "CANCELAR" ? "Cancelada" : "Rechazada";
                 await query("UPDATE lista_espera_ofertas SET estado = ?, fecha_respuesta = NOW() WHERE oferta_id = ? AND estado = 'Pendiente'", [estadoOferta, oferta.oferta_id]);
                 await query("UPDATE lista_espera SET estado_espera = 'Activo' WHERE espera_id = ? AND estado_espera = 'Ofertado'", [oferta.espera_id]);
-                cupoParaSiguiente = cupo;
+                await reasignarCupoListaEspera(db, cupo, client, query);
                 return {
                     ok: true,
                     status: 200,
@@ -289,7 +296,6 @@ async function responderOfertaListaEspera(db, { ofertaId, pacienteId = null, dec
         return { ok: false, status: 500, mensaje: "No fue posible procesar la respuesta de la oferta" };
     }
 
-    if (cupoParaSiguiente) await reasignarCupoListaEspera(db, cupoParaSiguiente, client);
     return resultado;
 }
 

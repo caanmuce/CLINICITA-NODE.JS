@@ -11,6 +11,8 @@ import {
   XCircle,
   ArrowUp,
   ArrowDown,
+  Check,
+  Send,
 } from "lucide-react";
 import { listaEsperaApi } from "../../api/listaEspera";
 
@@ -28,16 +30,30 @@ const formatDate = (dateStr) => {
   });
 };
 
+const formatDateShort = (dateStr) => {
+  if (!dateStr) return "—";
+  const date = new Date(dateStr);
+  return date.toLocaleDateString("es-CO", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "America/Bogota",
+  });
+};
+
 const getEstadoColor = (estado) => {
-  // Backend devuelve solo 'Activo' para la lista del paciente
-  // Mapear a estilos del frontend
+  // Usar estados reales del backend: 'Activo', 'Ofertado', 'Asignado', 'Expirado', 'Cancelado'
   switch (estado) {
     case "Activo":
       return "bg-yellow-100 text-yellow-800";
-    case "Asignado":
+    case "Ofertado":
       return "bg-blue-100 text-blue-800";
+    case "Asignado":
+      return "bg-green-100 text-green-800";
     case "Expirado":
       return "bg-gray-100 text-gray-800";
+    case "Cancelado":
+      return "bg-red-100 text-red-800";
     default:
       return "bg-gray-100 text-gray-800";
   }
@@ -46,13 +62,34 @@ const getEstadoColor = (estado) => {
 const getEstadoLabel = (estado) => {
   switch (estado) {
     case "Activo":
-      return "Pendiente";
+      return "Activo";
+    case "Ofertado":
+      return "Oferta pendiente";
     case "Asignado":
-      return "Asignado (cupo liberado)";
+      return "Asignado";
     case "Expirado":
       return "Expirado";
+    case "Cancelado":
+      return "Cancelado";
     default:
       return estado;
+  }
+};
+
+const getEstadoIcon = (estado) => {
+  switch (estado) {
+    case "Activo":
+      return <Clock className="h-3 w-3" />;
+    case "Ofertado":
+      return <Send className="h-3 w-3" />;
+    case "Asignado":
+      return <Check className="h-3 w-3" />;
+    case "Expirado":
+      return <XCircle className="h-3 w-3" />;
+    case "Cancelado":
+      return <XCircle className="h-3 w-3" />;
+    default:
+      return <Clock className="h-3 w-3" />;
   }
 };
 
@@ -116,6 +153,8 @@ export const PacienteListaEspera = () => {
   const [showForm, setShowForm] = useState(false);
   const [formError, setFormError] = useState(null);
   const [especialidades, setEspecialidades] = useState([]);
+  const [ofertaDecisionLoading, setOfertaDecisionLoading] = useState(null);
+  const [retirarLoading, setRetirarLoading] = useState(false);
 
   const cargarLista = useCallback(async () => {
     setLoading(true);
@@ -186,6 +225,52 @@ export const PacienteListaEspera = () => {
       );
     }
   };
+
+  const handleAceptarOferta = async (ofertaId) => {
+    setOfertaDecisionLoading(ofertaId);
+    try {
+      const resultado = await listaEsperaApi.responderOferta(ofertaId, "ACEPTAR");
+      if (resultado.ok || resultado.mensaje) {
+        await cargarLista();
+      } else {
+        setError(resultado.mensaje || "No se pudo aceptar la oferta");
+      }
+    } catch (err) {
+      setError(err.userMessage || "No se pudo aceptar la oferta. Intenta nuevamente.");
+    } finally {
+      setOfertaDecisionLoading(null);
+    }
+  };
+
+  const handleRechazarOferta = async (ofertaId) => {
+    setOfertaDecisionLoading(ofertaId);
+    try {
+      const resultado = await listaEsperaApi.responderOferta(ofertaId, "RECHAZAR");
+      if (resultado.ok || resultado.mensaje) {
+        await cargarLista();
+      } else {
+        setError(resultado.mensaje || "No se pudo rechazar la oferta");
+      }
+    } catch (err) {
+      setError(err.userMessage || "No se pudo rechazar la oferta. Intenta nuevamente.");
+    } finally {
+      setOfertaDecisionLoading(null);
+    }
+  };
+
+  const handleRetirar = async (esperaId) => {
+    setRetirarLoading(true);
+    try {
+      await listaEsperaApi.retirarMe(esperaId);
+      await cargarLista();
+    } catch (err) {
+      setError(err.userMessage || "No se pudo retirar de la lista. Intenta nuevamente.");
+    } finally {
+      setRetirarLoading(false);
+    }
+  };
+
+  const tieneOfertaPendiente = (item) => item.estado === "Ofertado" && item.oferta_id;
 
   if (loading) {
     return (
@@ -360,6 +445,9 @@ export const PacienteListaEspera = () => {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Posición
                   </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Acciones
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
@@ -392,23 +480,66 @@ export const PacienteListaEspera = () => {
                       <span
                         className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ${getEstadoColor(item.estado)}`}
                       >
-                        {item.estado === "confirmada" && (
-                          <CheckCircle className="h-3 w-3" />
-                        )}
-                        {item.estado === "pendiente" && (
-                          <Clock className="h-3 w-3" />
-                        )}
-                        {item.estado === "atendida" && (
-                          <CheckCircle className="h-3 w-3" />
-                        )}
-                        {item.estado === "cancelada" && (
-                          <XCircle className="h-3 w-3" />
-                        )}
+                        {getEstadoIcon(item.estado)}
                         {getEstadoLabel(item.estado)}
                       </span>
+                      {tieneOfertaPendiente(item) && (
+                        <div className="mt-2 text-xs text-blue-600">
+                          Oferta para {formatDateShort(item.oferta_fecha)} {item.oferta_hora}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-4 text-gray-900 font-medium">
                       {item.posicion ? `#${item.posicion}` : "—"}
+                    </td>
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-2">
+                        {tieneOfertaPendiente(item) && (
+                          <>
+                            <button
+                              onClick={() => handleAceptarOferta(item.oferta_id)}
+                              disabled={ofertaDecisionLoading === item.oferta_id}
+                              className="px-3 py-1.5 bg-green-600 text-white text-xs rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              title="Aceptar oferta"
+                            >
+                              {ofertaDecisionLoading === item.oferta_id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Check className="h-4 w-4" />
+                              )}
+                              <span className="hidden sm:inline ml-1">Aceptar</span>
+                            </button>
+                            <button
+                              onClick={() => handleRechazarOferta(item.oferta_id)}
+                              disabled={ofertaDecisionLoading === item.oferta_id}
+                              className="px-3 py-1.5 bg-red-600 text-white text-xs rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              title="Rechazar oferta"
+                            >
+                              {ofertaDecisionLoading === item.oferta_id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <XCircle className="h-4 w-4" />
+                              )}
+                              <span className="hidden sm:inline ml-1">Rechazar</span>
+                            </button>
+                          </>
+                        )}
+                        {item.estado === "Activo" && (
+                          <button
+                            onClick={() => handleRetirar(item.id)}
+                            disabled={retirarLoading}
+                            className="px-3 py-1.5 bg-gray-200 text-gray-700 text-xs rounded hover:bg-gray-300 disabled:opacity-50 transition-colors"
+                            title="Retirarse"
+                          >
+                            {retirarLoading ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <XCircle className="h-4 w-4" />
+                            )}
+                            <span className="hidden sm:inline ml-1">Retirar</span>
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

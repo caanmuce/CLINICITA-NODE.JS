@@ -26,22 +26,40 @@ export const listaEsperaApi = {
   },
 
   // GET /api/lista-espera/me (Paciente ve su lista de espera)
-  // Backend devuelve: { lista_espera: [{ espera_id, especialidad_requerida, sede, prioridad, fecha_inscripcion, posicion }, ...] }
-  // Frontend espera: [{ id, especialidad_nombre, prioridad, estado, motivo, fecha_inscripcion, posicion }, ...]
+  // Backend devuelve: { lista_espera: [{ espera_id, especialidad_requerida, sede, prioridad, fecha_inscripcion, posicion, estado_espera, oferta_id, oferta_fecha, oferta_hora, oferta_vence_en, oferta_medico }, ...] }
   listarMiLista: async () => {
     const response = await apiClient.get("/lista-espera/me");
     const lista = response.data.lista_espera || [];
-    // Transformar campos del backend al formato que espera el frontend
+    // Transformar campos del backend al formato que espera el frontend, conservando estados reales
     return lista.map((item) => ({
       id: item.espera_id,
       especialidad_nombre: item.especialidad_requerida,
       sede_nombre: item.sede,
       prioridad: item.prioridad, // Backend: 'Alta', 'Media', 'Baja'
-      estado: "Activo", // Backend solo devuelve 'Activo', mapear a 'pendiente' para el frontend
-      motivo: null,
+      estado: item.estado_espera || "Activo", // Usar estado real del backend
+      motivo: item.observaciones || null,
       fecha_inscripcion: item.fecha_inscripcion,
       posicion: item.posicion,
+      oferta_id: item.oferta_id || null,
+      oferta_fecha: item.oferta_fecha || null,
+      oferta_hora: item.oferta_hora || null,
+      oferta_vence_en: item.oferta_vence_en || null,
+      oferta_medico: item.oferta_medico || null,
     }));
+  },
+
+  // POST /api/lista-espera/ofertas/:id/responder (Paciente acepta/rechaza oferta)
+  responderOferta: async (ofertaId, decision) => {
+    const response = await apiClient.post(`/lista-espera/ofertas/${ofertaId}/responder`, {
+      decision,
+    });
+    return response.data;
+  },
+
+  // DELETE /api/lista-espera/me/:id (Paciente se retira de la lista)
+  retirarMe: async (id) => {
+    const response = await apiClient.delete(`/lista-espera/me/${id}`);
+    return response.data;
   },
 
   // POST /api/lista-espera/me (Paciente se inscribe)

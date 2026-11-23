@@ -187,15 +187,22 @@ export const PacientePreconsulta = () => {
     setSaving(true);
     setError(null);
     try {
-      // Usar API real cuando exista
-      // await fichasPreconsultaApi.crear({ cita_id: selectedCita.id, ...formData, enviado: enviar });
-      await new Promise((r) => setTimeout(r, 800));
+      await fichasPreconsultaApi.crear({
+        cita_id: selectedCita.id,
+        motivo: formData.motivo.trim(),
+        sintomas: formData.sintomas.trim(),
+        antecedentes: formData.antecedentes.trim(),
+        alergias: formData.alergias.trim(),
+        medicamentos: formData.medicamentos.trim(),
+        signos_vitales: formData.signos_vitales,
+        enviado: _enviar,
+      });
       setSuccess(true);
       setError(null);
       await cargarFicha(selectedCita.id);
     } catch (err) {
       console.error(err);
-      setError("Error guardando preconsulta");
+      setError(err.response?.data?.mensaje || "Error guardando preconsulta");
     } finally {
       setSaving(false);
     }

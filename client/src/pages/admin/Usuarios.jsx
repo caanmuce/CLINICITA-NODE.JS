@@ -1,6 +1,6 @@
 // src/pages/admin/Usuarios.jsx - Gestión de usuarios
 import React, { useState, useEffect, useCallback } from "react";
-import { Users, UserPlus, Search, AlertCircle, Loader2 } from "lucide-react";
+import { Users, UserPlus, Search, AlertCircle, Loader2, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { usuariosApi } from "../../api/usuarios";
 
@@ -37,6 +37,7 @@ export const AdminUsuarios = () => {
     activo: true,
   });
   const [saving, setSaving] = useState(false);
+  const [eliminandoId, setEliminandoId] = useState(null);
 
   const cargarUsuarios = useCallback(async (q) => {
     setLoading(true);
@@ -96,6 +97,20 @@ export const AdminUsuarios = () => {
       setError("No se pudo actualizar el usuario: " + (err.message || "Intente nuevamente"));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleEliminar = async (id) => {
+    if (!window.confirm("¿Eliminar este usuario?")) return;
+    setEliminandoId(id);
+    try {
+      await usuariosApi.eliminar(id);
+      await cargarUsuarios(searchTerm);
+    } catch (err) {
+      const msg = err.response?.data?.mensaje || "No se pudo eliminar el usuario.";
+      alert(msg);
+    } finally {
+      setEliminandoId(null);
     }
   };
 
@@ -176,12 +191,25 @@ export const AdminUsuarios = () => {
                     <td className="px-4 py-4 text-gray-600">{u.estado || "Activo"}</td>
                     <td className="px-4 py-4 text-gray-600">{formatDate(u.ultimo_acceso || u.fecha_ultimo_acceso)}</td>
                     <td className="px-4 py-4">
-                      <button
-                        onClick={() => abrirEdicion(u)}
-                        className="text-teal-600 hover:text-teal-800 text-sm font-medium"
-                      >
-                        Editar
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => abrirEdicion(u)}
+                          className="text-teal-600 hover:text-teal-800 text-sm font-medium"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          onClick={() => handleEliminar(u.id || u.usuario_id)}
+                          className="text-red-600 hover:text-red-800 text-sm font-medium disabled:opacity-50"
+                          disabled={eliminandoId === u.id || eliminandoId === u.usuario_id}
+                        >
+                          {eliminandoId === u.id || eliminandoId === u.usuario_id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))

@@ -49,6 +49,9 @@ const menuItems = {
     { path: "/admin/medicos", label: "Médicos", icon: Stethoscope },
     { path: "/admin/sedes", label: "Sedes", icon: Building },
     { path: "/admin/reportes", label: "Reportes", icon: BarChart },
+    { path: "/admin/lista-espera", label: "Lista de Espera", icon: Calendar },
+    { path: "/admin/especialidades", label: "Especialidades", icon: Stethoscope },
+    { path: "/admin/horarios", label: "Horarios", icon: Clock },
   ],
 };
 

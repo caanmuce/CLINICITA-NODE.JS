@@ -1,6 +1,7 @@
 """API FastAPI para servicio de riesgo no-show"""
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Security, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 from contextlib import asynccontextmanager
 from typing import List, Optional
 import os
@@ -17,6 +18,26 @@ from .schemas import (
     TrainResponse, FeatureImportance
 )
 
+# Cabecera de autenticación interna (X-API-Key)
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> str:
+    """Valida que la clave X-API-Key coincida con la configurada en el servicio ML."""
+    expected = settings.ml_service_secret_key
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Servicio ML no configurado: ML_SERVICE_SECRET_KEY ausente",
+        )
+    if api_key is None or api_key != expected:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="API Key inválida o ausente",
+        )
+    return api_key
+
+
 # Estado global
 predictor: Optional[ModelPredictor] = None
 feature_builder: Optional[FeatureBuilder] = None
@@ -30,6 +51,14 @@ async def lifespan(app: FastAPI):
     # Inicializar pool y feature builder
     pool = get_db_pool()
     feature_builder = FeatureBuilder(pool)
+
+    # Validar que la clave de seguridad del ML esté configurada
+    if not settings.ml_service_secret_key:
+        raise RuntimeError(
+            "FATAL: ML_SERVICE_SECRET_KEY no está configurada. "
+            "Defina la variable de entorno antes de arrancar el servicio ML."
+        )
+    print("[ML] ML_SERVICE_SECRET_KEY configurada correctamente.")
 
     # Cargar modelo más reciente
     model_dir = settings.model_dir
@@ -76,7 +105,11 @@ async def health():
     }
 
 
-@app.get("/riesgo/{paciente_id}", response_model=RiskResponse)
+@app.get(
+    "/riesgo/{paciente_id}",
+    response_model=RiskResponse,
+    dependencies=[Depends(verify_api_key)],
+)
 async def get_riesgo(paciente_id: int):
     """Obtiene riesgo de no-show para un paciente"""
     if not predictor:
@@ -90,7 +123,11 @@ async def get_riesgo(paciente_id: int):
     return result
 
 
-@app.post("/riesgo/batch", response_model=List[RiskResponse])
+@app.post(
+    "/riesgo/batch",
+    response_model=List[RiskResponse],
+    dependencies=[Depends(verify_api_key)],
+)
 async def get_riesgo_batch(request: BatchRequest):
     """Obtiene riesgo para múltiples pacientes"""
     if not predictor:
@@ -107,7 +144,11 @@ async def get_riesgo_batch(request: BatchRequest):
     return results
 
 
-@app.post("/train", response_model=TrainResponse)
+@app.post(
+    "/train",
+    response_model=TrainResponse,
+    dependencies=[Depends(verify_api_key)],
+)
 async def train_model(request: TrainRequest, background_tasks: BackgroundTasks):
     """Dispara reentrenamiento en background"""
     from .model.trainer import ModelTrainer
@@ -131,7 +172,10 @@ async def train_model(request: TrainRequest, background_tasks: BackgroundTasks):
     }
 
 
-@app.post("/recalcular-todos")
+@app.post(
+    "/recalcular-todos",
+    dependencies=[Depends(verify_api_key)],
+)
 async def recalcular_todos(background_tasks: BackgroundTasks):
     """Recalcula scores para TODOS los pacientes y guarda en BD"""
     if not predictor:

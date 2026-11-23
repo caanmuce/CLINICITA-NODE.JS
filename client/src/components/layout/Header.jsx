@@ -60,7 +60,7 @@ export const Header = ({ onMenuClick }) => {
   }, []);
 
   return (
-    <header className="fixed top-0 left-0 right-0 h-16 bg-white border-b border-gray-200 z-30 flex items-center justify-between px-6 transition-all duration-300">
+    <header className="fixed top-0 left-0 right-0 h-16 bg-white border-b border-gray-200 z-30 flex items-center px-6 transition-all duration-300">
       {/* Mobile menu button - izquierda */}
       <motion.button
         onClick={onMenuClick}
@@ -73,7 +73,7 @@ export const Header = ({ onMenuClick }) => {
       </motion.button>
 
       {/* Logo Clinicita - centro */}
-      <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 cursor-pointer z-10">
+      <div className="flex-1 flex justify-center">
         <Link
           to="/"
           onClick={(e) => {
@@ -81,7 +81,7 @@ export const Header = ({ onMenuClick }) => {
             setIsDropdownOpen(false);
             setIsNotificationsOpen(false);
           }}
-          className="flex items-center gap-2"
+          className="flex items-center gap-2 cursor-pointer"
         >
           <motion.div
             whileHover={{ scale: 1.1, rotate: 5 }}
