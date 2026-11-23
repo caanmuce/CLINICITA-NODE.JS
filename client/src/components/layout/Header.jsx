@@ -2,8 +2,8 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { useAuth } from "../../context/AuthContext";
-import { useNavigate } from "react-router-dom";
-import { Menu, Bell, User, ChevronDown, LogOut, Settings } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { Menu, Bell, User, ChevronDown, LogOut, Settings, HeartPulse, Home } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 export const Header = ({ onMenuClick }) => {
@@ -16,27 +16,27 @@ export const Header = ({ onMenuClick }) => {
 
   const RUTAS_PERFIL = {
     paciente: "/paciente/perfil",
-    medico: "/medico",
-    recepcionista: "/recepcionista",
-    administrador: "/admin",
+    medico: "/medico/perfil",
+    recepcionista: "/recepcionista/perfil",
+    administrador: "/admin/perfil",
   };
 
   const RUTAS_CONFIG = {
-    paciente: "/paciente",
-    medico: "/medico",
-    recepcionista: "/recepcionista",
-    administrador: "/admin",
+    paciente: "/paciente/configuracion",
+    medico: "/medico/configuracion",
+    recepcionista: "/recepcionista/configuracion",
+    administrador: "/admin/configuracion",
   };
 
   const rol = user?.rol?.toLowerCase() || "paciente";
 
   const irPerfil = () => {
-    navigate(RUTAS_PERFIL[rol] || "/paciente");
+    navigate(RUTAS_PERFIL[rol] || "/paciente/perfil");
     setIsDropdownOpen(false);
   };
 
   const irConfiguracion = () => {
-    navigate(RUTAS_CONFIG[rol] || "/paciente");
+    navigate(RUTAS_CONFIG[rol] || "/paciente/configuracion");
     setIsDropdownOpen(false);
   };
 
@@ -61,7 +61,7 @@ export const Header = ({ onMenuClick }) => {
 
   return (
     <header className="fixed top-0 right-0 h-16 bg-white border-b border-gray-200 z-30 flex items-center justify-between px-6 transition-all duration-300">
-      {/* Mobile menu button */}
+      {/* Mobile menu button - izquierda */}
       <motion.button
         onClick={onMenuClick}
         className="lg:hidden p-2 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
@@ -72,8 +72,30 @@ export const Header = ({ onMenuClick }) => {
         <Menu className="h-6 w-6" />
       </motion.button>
 
-      {/* Page title - will be set by children via context or props */}
-      <div className="flex-1 lg:ml-0"></div>
+      {/* Logo Clinicita - centro */}
+      <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 cursor-pointer z-10">
+        <Link
+          to="/"
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsDropdownOpen(false);
+            setIsNotificationsOpen(false);
+          }}
+          className="flex items-center gap-2"
+        >
+          <motion.div
+            whileHover={{ scale: 1.1, rotate: 5 }}
+            whileTap={{ scale: 0.95 }}
+            className="p-3 rounded-2xl bg-gradient-to-br from-teal-500 to-teal-700 shadow-lg shadow-teal-500/25"
+          >
+            <HeartPulse className="h-6 w-6 text-white" aria-hidden="true" />
+          </motion.div>
+          <div className="hidden sm:block">
+            <h1 className="text-sm font-bold text-gray-900 tracking-tight leading-none">CLINICITA</h1>
+            <p className="text-xs text-teal-600 font-medium leading-none">Sistema Médico</p>
+          </div>
+        </Link>
+      </div>
 
       {/* Right side actions */}
       <div className="flex items-center gap-4">
@@ -166,6 +188,17 @@ export const Header = ({ onMenuClick }) => {
                 >
                   <Settings className="h-4 w-4" />
                   Configuración
+                </motion.button>
+                <motion.button
+                  onClick={() => {
+                    navigate("/");
+                    setIsDropdownOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
+                  whileHover={{ x: 4 }}
+                >
+                  <Home className="h-4 w-4" />
+                  Volver a inicio
                 </motion.button>
                 <hr className="my-1 border-gray-200" />
                 <motion.button
