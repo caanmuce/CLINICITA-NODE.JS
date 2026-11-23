@@ -127,7 +127,8 @@ export const PacienteCitas = () => {
     try {
       const response = await citasApi.listarMisCitas();
       const data = response.data || response || [];
-      setCitas(Array.isArray(data) ? data : []);
+      const citasData = Array.isArray(data) ? data : data?.citas || data?.data || [];
+      setCitas(citasData);
     } catch (err) {
       console.error("Error cargando citas:", err);
       setError("No se pudieron cargar las citas. Intenta nuevamente.");
