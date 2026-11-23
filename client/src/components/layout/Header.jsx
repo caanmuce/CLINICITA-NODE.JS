@@ -88,11 +88,8 @@ export const Header = ({ onMenuClick }) => {
             whileTap={{ scale: 0.95 }}
             className="p-3 rounded-2xl bg-gradient-to-br from-teal-500 to-teal-700 shadow-lg shadow-teal-500/25"
           >
-            <HeartPulse className="h-6 w-6 text-white" aria-hidden="true" />
+            <HeartPulse className="h-8 w-8 text-white" aria-hidden="true" />
           </motion.div>
-          <div className="hidden sm:block">
-            <h1 className="text-sm font-bold text-gray-900 tracking-tight leading-none">CLINICITA</h1>
-          </div>
         </Link>
       </div>
 
