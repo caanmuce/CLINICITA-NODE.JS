@@ -2,15 +2,48 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { useAuth } from "../../context/AuthContext";
+import { useNavigate } from "react-router-dom";
 import { Menu, Bell, User, ChevronDown, LogOut, Settings } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 export const Header = ({ onMenuClick }) => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const dropdownRef = useRef(null);
   const notificationsRef = useRef(null);
+
+  const RUTAS_PERFIL = {
+    paciente: "/paciente/perfil",
+    medico: "/medico",
+    recepcionista: "/recepcionista",
+    administrador: "/admin",
+  };
+
+  const RUTAS_CONFIG = {
+    paciente: "/paciente",
+    medico: "/medico",
+    recepcionista: "/recepcionista",
+    administrador: "/admin",
+  };
+
+  const rol = user?.rol?.toLowerCase() || "paciente";
+
+  const irPerfil = () => {
+    navigate(RUTAS_PERFIL[rol] || "/paciente");
+    setIsDropdownOpen(false);
+  };
+
+  const irConfiguracion = () => {
+    navigate(RUTAS_CONFIG[rol] || "/paciente");
+    setIsDropdownOpen(false);
+  };
+
+  const handleLogout = () => {
+    logout();
+    setIsDropdownOpen(false);
+  };
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -119,14 +152,16 @@ export const Header = ({ onMenuClick }) => {
                   <p className="text-xs text-gray-500">{user?.correo}</p>
                 </div>
                 <motion.button
-                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  onClick={irPerfil}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
                   whileHover={{ x: 4 }}
                 >
                   <User className="h-4 w-4" />
                   Mi perfil
                 </motion.button>
                 <motion.button
-                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  onClick={irConfiguracion}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
                   whileHover={{ x: 4 }}
                 >
                   <Settings className="h-4 w-4" />
@@ -134,7 +169,8 @@ export const Header = ({ onMenuClick }) => {
                 </motion.button>
                 <hr className="my-1 border-gray-200" />
                 <motion.button
-                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                  onClick={handleLogout}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
                   whileHover={{ x: 4 }}
                 >
                   <LogOut className="h-4 w-4" />
