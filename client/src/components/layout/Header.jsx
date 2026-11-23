@@ -92,7 +92,6 @@ export const Header = ({ onMenuClick }) => {
           </motion.div>
           <div className="hidden sm:block">
             <h1 className="text-sm font-bold text-gray-900 tracking-tight leading-none">CLINICITA</h1>
-            <p className="text-xs text-teal-600 font-medium leading-none">Sistema Médico</p>
           </div>
         </Link>
       </div>
