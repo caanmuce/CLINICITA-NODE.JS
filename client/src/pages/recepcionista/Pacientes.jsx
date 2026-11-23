@@ -115,4 +115,4 @@ export const RecepcionistaPacientes = () => {
   );
 };
 
-export default Pacientes;
+export default RecepcionistaPacientes;

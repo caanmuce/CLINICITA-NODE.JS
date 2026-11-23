@@ -1,6 +1,6 @@
 // src/routes/AppRoutes.jsx
 
-import React, { Suspense, lazy } from "react";
+import React, { Suspense } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -18,65 +18,26 @@ import TerminosPage from "../pages/auth/TerminosPage";
 import AyudaPage from "../pages/auth/AyudaPage";
 import ContactoPage, { LandingPage } from "../pages/auth/ContactoPage";
 
-// Lazy-loaded page components
-const PacienteDashboard = lazy(() =>
-  import("../pages/paciente/Dashboard").then((m) => m.PacienteDashboard),
-);
-const PacienteCitas = lazy(() =>
-  import("../pages/paciente/Citas").then((m) => m.PacienteCitas),
-);
-const PacienteAgendarCita = lazy(() =>
-  import("../pages/paciente/AgendarCita").then((m) => m.PacienteAgendarCita),
-);
-const PacienteListaEspera = lazy(() =>
-  import("../pages/paciente/ListaEspera").then((m) => m.PacienteListaEspera),
-);
-const PacientePreconsulta = lazy(() =>
-  import("../pages/paciente/Preconsulta").then((m) => m.PacientePreconsulta),
-);
-const PacientePerfil = lazy(() =>
-  import("../pages/paciente/Perfil").then((m) => m.PacientePerfil),
-);
-const MedicoDashboard = lazy(() =>
-  import("../pages/medico/Dashboard").then((m) => m.MedicoDashboard),
-);
-const MedicoAgenda = lazy(() =>
-  import("../pages/medico/Agenda").then((m) => m.MedicoAgenda),
-);
-const MedicoCitas = lazy(() =>
-  import("../pages/medico/Citas").then((m) => m.MedicoCitas),
-);
-const MedicoPacientes = lazy(() =>
-  import("../pages/medico/Pacientes").then((m) => m.MedicoPacientes),
-);
-const RecepcionistaDashboard = lazy(() =>
-  import("../pages/recepcionista/Dashboard").then((m) => m.RecepcionistaDashboard),
-);
-const RecepcionistaCitas = lazy(() =>
-  import("../pages/recepcionista/Citas").then((m) => m.RecepcionistaCitas),
-);
-const RecepcionistaPacientes = lazy(() =>
-  import("../pages/recepcionista/Pacientes").then((m) => m.RecepcionistaPacientes),
-);
-const RecepcionistaHorarios = lazy(() =>
-  import("../pages/recepcionista/Horarios").then((m) => m.RecepcionistaHorarios),
-);
-
-const AdminDashboard = lazy(() =>
-  import("../pages/admin/Dashboard").then((m) => m.AdminDashboard),
-);
-const AdminUsuarios = lazy(() =>
-  import("../pages/admin/Usuarios").then((m) => m.AdminUsuarios),
-);
-const AdminMedicos = lazy(() =>
-  import("../pages/admin/Medicos").then((m) => m.AdminMedicos),
-);
-const AdminSedes = lazy(() =>
-  import("../pages/admin/Sedes").then((m) => m.AdminSedes),
-);
-const AdminReportes = lazy(() =>
-  import("../pages/admin/Reportes").then((m) => m.AdminReportes),
-);
+// Page components (static imports)
+import { PacienteDashboard } from "../pages/paciente/Dashboard";
+import { PacienteCitas } from "../pages/paciente/Citas";
+import { PacienteAgendarCita } from "../pages/paciente/AgendarCita";
+import { PacienteListaEspera } from "../pages/paciente/ListaEspera";
+import { PacientePreconsulta } from "../pages/paciente/Preconsulta";
+import { PacientePerfil } from "../pages/paciente/Perfil";
+import { MedicoDashboard } from "../pages/medico/Dashboard";
+import { MedicoAgenda } from "../pages/medico/Agenda";
+import MedicoCitas from "../pages/medico/Citas";
+import { MedicoPacientes } from "../pages/medico/Pacientes";
+import { RecepcionistaDashboard } from "../pages/recepcionista/Dashboard";
+import { RecepcionistaCitas } from "../pages/recepcionista/Citas";
+import { RecepcionistaPacientes } from "../pages/recepcionista/Pacientes";
+import { RecepcionistaHorarios } from "../pages/recepcionista/Horarios";
+import { AdminDashboard } from "../pages/admin/Dashboard";
+import { AdminUsuarios } from "../pages/admin/Usuarios";
+import { AdminMedicos } from "../pages/admin/Medicos";
+import { AdminSedes } from "../pages/admin/Sedes";
+import { AdminReportes } from "../pages/admin/Reportes";
 function AppRoutes() {
   const { user, loading, isAuthenticated } = useAuth();
 

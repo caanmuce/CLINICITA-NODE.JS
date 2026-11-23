@@ -327,6 +327,21 @@ async function initializeAuth() {
             CONSTRAINT fk_espera_oferta_cita FOREIGN KEY (cita_id) REFERENCES citas(cita_id) ON DELETE SET NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
+    await query(`CREATE TABLE IF NOT EXISTS paciente_riesgo_no_show (
+        riesgo_id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        paciente_id INT NOT NULL,
+        score DECIMAL(5,2) NOT NULL COMMENT '0-100, mayor = mas riesgo',
+        percentil TINYINT(3) UNSIGNED NOT NULL COMMENT '1-100 respecto a poblacion',
+        nivel_riesgo ENUM('Bajo','Medio','Alto','Critico') NOT NULL,
+        features_json JSON NOT NULL COMMENT 'Features usados para explicabilidad',
+        model_version VARCHAR(50) NOT NULL,
+        calculado_en TIMESTAMP NOT NULL DEFAULT current_timestamp(),
+        UNIQUE KEY uk_paciente_riesgo (paciente_id),
+        KEY idx_nivel_riesgo (nivel_riesgo),
+        KEY idx_score (score),
+        CONSTRAINT fk_riesgo_paciente FOREIGN KEY (paciente_id) REFERENCES pacientes (paciente_id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
     // Este trigger antiguo cerraba TODAS las inscripciones de un paciente al completar cualquier cita.
     await query("DROP TRIGGER IF EXISTS trg_actualizar_lista_espera").catch((error) => {
         console.warn("No se pudo retirar trg_actualizar_lista_espera:", error.message);
@@ -389,8 +404,13 @@ async function initializeAuth() {
                 "INSERT INTO usuarios (nombre_completo, correo, clave_hash, rol) VALUES (?, ?, ?, ?)",
                 [nombre, correo, hashPassword(clave), rol]
             );
-        } else if (existing[0].clave_hash.length < 161) {
-            await query("UPDATE usuarios SET clave_hash = ? WHERE usuario_id = ?", [hashPassword(clave), existing[0].usuario_id]);
+        } else {
+            // Siempre asegurar que los usuarios demo tengan los datos correctos
+            // (contraseña, rol y activo = 1), incluso si ya existen con datos incorrectos
+            await query(
+                "UPDATE usuarios SET clave_hash = ?, rol = ?, activo = 1 WHERE usuario_id = ?",
+                [hashPassword(clave), rol, existing[0].usuario_id]
+            );
         }
     }
 
@@ -467,10 +487,7 @@ app.use("/test-panel.html", (req, res, next) => {
     );
     next();
 });
-app.use(express.static(path.join(__dirname, "..", "public"), (req, res, next) => {
-    console.log("DEBUG: express.static middleware hit for:", req.path);
-    next();
-}));
+app.use(express.static(path.join(__dirname, "..", "public")));
 
 // SPA fallback: sirve index.html para rutas no-API y no-estáticas (React Router)
 app.use((req, res, next) => {
@@ -929,8 +946,8 @@ const schemas = {
     }),
     // Recepcionista: buscar pacientes
     filtrosPacientes: z.object({
-        q: z.string().trim().min(2).max(100),
-        limit: z.coerce.number().int().positive().max(20).default(10)
+        q: z.string().trim().min(0).max(100).default(""),
+        limit: z.coerce.number().int().positive().max(200).default(50)
     }),
     // Recepcionista: agendar a nombre de un paciente
     crearCitaAdmin: z.object({
@@ -2098,7 +2115,7 @@ initializeAuth()
 
 // ---------- 2) Buscar pacientes ----------
 // Devuelve lo mínimo necesario para identificar al paciente (no expone teléfono).
-app.get("/api/pacientes", requireAuth, requireRole("recepcionista", "administrador"), validarQuery(schemas.filtrosPacientes), async (req, res) => {
+app.get("/api/pacientes", requireAuth, requireRole("recepcionista", "administrador", "medico"), validarQuery(schemas.filtrosPacientes), async (req, res) => {
     try {
         const { q, limit } = req.validatedQuery;
 

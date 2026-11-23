@@ -150,7 +150,8 @@ export const PacienteDashboard = () => {
       try {
         // Cargar citas del paciente
         const citasResponse = await citasApi.listarMisCitas();
-        const citas = citasResponse.data || citasResponse || [];
+        const citasData = citasResponse?.data || citasResponse || [];
+        const citas = Array.isArray(citasData) ? citasData : citasData?.citas || [];
 
         // Filtrar citas futuras (Pendiente, Confirmada) y ordenar por fecha
         const ahora = new Date();
@@ -184,7 +185,8 @@ export const PacienteDashboard = () => {
         let enListaEspera = 0;
         try {
           const listaResponse = await listaEsperaApi.listarMiLista();
-          const lista = listaResponse.data || listaResponse || [];
+          const listaData = listaResponse?.data || listaResponse || [];
+          const lista = Array.isArray(listaData) ? listaData : listaData?.listaEspera || [];
           enListaEspera = lista.filter(
             (item) => item.estado === "pendiente",
           ).length;
