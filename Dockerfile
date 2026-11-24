@@ -34,7 +34,7 @@ RUN npm ci --omit=dev
 
 COPY server ./server
 COPY public ./public
-COPY --from=frontend-builder /app/client/dist ./public
+COPY --from=frontend-builder /app/public ./public
 
 ENV NODE_ENV=production
 EXPOSE 3000
