@@ -1465,9 +1465,16 @@ app.delete("/api/sedes/:id", requireAuth, requireRole("administrador"), async (r
 // -------------------- ADMIN: HORARIOS --------------------
 app.get("/api/horarios/admin", requireAuth, requireRole("administrador", "recepcionista", "medico"), async (req, res) => {
     try {
-        const { medico_id, sede_id, dia_semana } = req.query;
+        let { medico_id, sede_id, dia_semana } = req.query;
         const filtros = [];
         let where = "WHERE h.activo = 1";
+
+        // Seguridad: un médico solo debe ver SUS horarios; ignora el medico_id del cliente
+        if (req.user.rol === "medico") {
+            const medicoRow = await query("SELECT medico_id FROM usuarios WHERE usuario_id = ? AND rol = 'medico'", [req.user.id]);
+            medico_id = medicoRow[0]?.medico_id || null;
+            if (!medico_id) return res.json({ horarios: [] });
+        }
 
         if (medico_id) { where += " AND h.medico_id = ?"; filtros.push(medico_id); }
         if (sede_id) { where += " AND h.sede_id = ?"; filtros.push(sede_id); }
@@ -2264,10 +2271,15 @@ app.get("/api/pacientes", requireAuth, requireRole("recepcionista", "administrad
         const patron = `%${q.replace(/[%_\\]/g, "\\$&")}%`;
 
         const pacientes = await query(
-            `SELECT paciente_id, nombre_completo, documento_id
-             FROM pacientes
-             WHERE nombre_completo LIKE ? OR documento_id LIKE ?
-             ORDER BY nombre_completo
+            `SELECT p.paciente_id, p.nombre_completo, p.documento_id,
+                   TIMESTAMPDIFF(YEAR, p.fecha_nacimiento, CURDATE()) AS edad,
+                   (SELECT DATE_FORMAT(MAX(c.fecha_cita), '%Y-%m-%d')
+                    FROM citas c WHERE c.paciente_id = p.paciente_id AND c.fecha_cita <= CURDATE()) AS ultima_cita,
+                   (SELECT DATE_FORMAT(MIN(c.fecha_cita), '%Y-%m-%d')
+                    FROM citas c WHERE c.paciente_id = p.paciente_id AND c.fecha_cita >= CURDATE()) AS proxima_cita
+             FROM pacientes p
+             WHERE p.nombre_completo LIKE ? OR p.documento_id LIKE ?
+             ORDER BY p.nombre_completo
              LIMIT ?`,
             [patron, patron, limit]
         );
@@ -2338,8 +2350,6 @@ app.post("/api/citas/admin", requireAuth, requireRole("recepcionista", "administ
         }
 
         res.status(201).json({ mensaje: "Cita agendada correctamente", cita_id: resultadoCita.citaId });
-
-        res.status(201).json({ mensaje: "Cita agendada correctamente", cita_id: cita.insertId });
     } catch (error) {
         if (error.sqlState === "45000") {
             return res.status(400).json({ mensaje: error.sqlMessage || "El médico no atiende en ese horario" });
@@ -2576,8 +2586,10 @@ app.get("/api/fichas-preconsulta/cita/:cita_id", requireAuth, async (req, res) =
         let autorizado = false;
         if (req.user.rol === "paciente" && pacienteId && f.paciente_id === pacienteId) autorizado = true;
         if (req.user.rol === "medico") {
+            const medicoRow = await query("SELECT medico_id FROM usuarios WHERE usuario_id = ? AND rol = 'medico'", [req.user.id]);
+            const medicoId = medicoRow[0]?.medico_id;
             const citaMedico = await query("SELECT medico_id FROM citas WHERE cita_id = ?", [cita_id]);
-            if (citaMedico.length && citaMedico[0].medico_id === req.user.id) autorizado = true;
+            if (citaMedico.length && medicoId && citaMedico[0].medico_id === medicoId) autorizado = true;
         }
         if (!autorizado) return res.status(403).json({ mensaje: "No tienes permiso para ver esta ficha" });
         try { f.signos_vitales = f.signos_vitales ? JSON.parse(f.signos_vitales) : null; } catch {}
@@ -2595,7 +2607,15 @@ app.get("/api/fichas-preconsulta/paciente/:paciente_id", requireAuth, async (req
         const pacienteIdAuth = await pacienteIdDeUsuario(req.user.id);
         let autorizado = false;
         if (req.user.rol === "paciente" && pacienteIdAuth && Number(paciente_id) === pacienteIdAuth) autorizado = true;
-        if (req.user.rol === "medico" || req.user.rol === "administrador") autorizado = true;
+        if (req.user.rol === "administrador") autorizado = true;
+        if (req.user.rol === "medico") {
+            const medicoRow = await query("SELECT medico_id FROM usuarios WHERE usuario_id = ? AND rol = 'medico'", [req.user.id]);
+            const medicoId = medicoRow[0]?.medico_id;
+            if (medicoId) {
+                const relacion = await query("SELECT 1 FROM citas WHERE medico_id = ? AND paciente_id = ? LIMIT 1", [medicoId, Number(paciente_id)]);
+                if (relacion.length) autorizado = true;
+            }
+        }
         if (!autorizado) return res.status(403).json({ mensaje: "No tienes permiso para listar estas fichas" });
         const fichas = await query(
             `SELECT f.ficha_id, f.cita_id, f.paciente_id, f.motivo, f.sintomas, f.antecedentes, f.alergias, f.medicamentos, f.signos_vitales, f.enviado, f.fecha_creacion AS fecha_registro,

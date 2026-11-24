@@ -30,7 +30,7 @@ export const MedicoAgenda = () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await horariosApi.listarAdmin({ medico_id: medicoId });
+      const data = await horariosApi.listarAdmin({});
       const horariosArray = data.horarios || data || [];
       setHorarios(Array.isArray(horariosArray) ? horariosArray : []);
     } catch (e) {

@@ -1,4 +1,4 @@
-// src/pages/recepcionista/Dashboard.jsx - Estilo Clinicita Teal
+﻿// src/pages/recepcionista/Dashboard.jsx - Estilo Clinicita Teal
 import React, { useEffect, useState } from "react";
 import { useAuth } from "../../context/AuthContext";
 import {
@@ -47,32 +47,13 @@ export const RecepcionistaDashboard = () => {
   const [errorLista, setErrorLista] = useState(false);
   const today = getColombiaDate();
 
-  // Riesgo ML recálculo
-  const [recalculandoRiesgo, setRecalculandoRiesgo] = useState(false);
-  const [riesgoRecalculado, setRiesgoRecalculado] = useState(null);
-  const [errorRiesgo, setErrorRiesgo] = useState(null);
-
-  const handleRecalcularRiesgos = async () => {
-    setRecalculandoRiesgo(true);
-    setErrorRiesgo(null);
-    setRiesgoRecalculado(null);
-    try {
-      const response = await pacientesApi.recalcularTodos();
-      setRiesgoRecalculado(response);
-    } catch (err) {
-      setErrorRiesgo(err.userMessage || "Error al recalcular riesgos");
-    } finally {
-      setRecalculandoRiesgo(false);
-    }
-  };
-
   useEffect(() => {
     const fetchCitasHoy = async () => {
       try {
         setLoadingCitas(true);
         const data = await citasApi.listarAdmin({ fecha: today });
         // Backend devuelve { citas: [...], total: N, page, limit }
-        // 'total' es el conteo TOTAL global (sin paginar), no solo la página actual
+        // 'total' es el conteo TOTAL global (sin paginar), no solo la pÃ¡gina actual
         setCitasHoy(data?.total || data?.length || 0);
         setErrorCitas(false);
       } catch (err) {
@@ -90,7 +71,7 @@ export const RecepcionistaDashboard = () => {
       try {
         setLoadingPendientes(true);
         const data = await citasApi.listarAdmin({ estado: "Pendiente" });
-        // 'total' = total global de citas pendientes (no solo la página)
+        // 'total' = total global de citas pendientes (no solo la pÃ¡gina)
         setPendientesConfirmar(data?.total || data?.length || 0);
         setErrorPendientes(false);
       } catch (err) {
@@ -310,68 +291,7 @@ export const RecepcionistaDashboard = () => {
           </div>
         </FadeIn>
 
-        {/* Recalcular riesgos ML - Recepción */}
-        <FadeIn delay={0.35}>
-          <AnimatedCard className="p-6 bg-purple-50 border border-purple-200">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-semibold text-purple-900 flex items-center gap-2">
-                  <HeartPulse className="h-5 w-5" />
-                  Recalcular Riesgos No-Show (ML)
-                </h3>
-                <p className="text-sm text-purple-700 mt-1">
-                  Ejecuta el modelo ML para actualizar el riesgo de no-show de
-                  todos los pacientes basado en su historial de citas
-                </p>
-              </div>
-              <button
-                onClick={handleRecalcularRiesgos}
-                disabled={recalculandoRiesgo}
-                className="px-6 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-              >
-                {recalculandoRiesgo ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Recalculando...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="h-4 w-4" />
-                    Recalcular ahora
-                  </>
-                )}
-              </button>
-            </div>
-
-            {errorRiesgo && (
-              <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-red-800 flex items-center gap-2">
-                  <AlertCircle className="h-5 w-5" />
-                  {errorRiesgo}
-                </p>
-              </div>
-            )}
-
-            {riesgoRecalculado && !recalculandoRiesgo && (
-              <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-                <p className="text-green-800 font-medium flex items-center gap-2">
-                  <XCircle className="h-5 w-5" />
-                  Recalculo completado:{" "}
-                  {riesgoRecalculado.pacientes_actualizados || 0} pacientes
-                  actualizados
-                </p>
-                <p className="text-sm text-green-700 mt-1">
-                  Ejecutado el:{" "}
-                  {riesgoRecalculado.timestamp
-                    ? new Date(riesgoRecalculado.timestamp).toLocaleString(
-                        "es-CO",
-                      )
-                    : "Ahora"}
-                </p>
-              </div>
-            )}
-          </AnimatedCard>
-        </FadeIn>
+        
 
         <FadeIn delay={0.4}>
           <AnimatedCard className="bg-yellow-50 border border-yellow-200 p-4">
@@ -395,3 +315,4 @@ export const RecepcionistaDashboard = () => {
     </SlideUp>
   );
 };
+

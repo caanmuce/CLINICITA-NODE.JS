@@ -64,7 +64,7 @@ export const AdminUsuarios = () => {
       nombre_completo: u.nombre_completo || u.nombre || "",
       correo: u.correo || u.correo_electronico || "",
       rol: u.rol || "",
-      activo: u.activo !== undefined ? u.activo : true,
+      activo: u.activo !== undefined ? Boolean(u.activo) : true,
     });
   };
 
@@ -87,7 +87,7 @@ export const AdminUsuarios = () => {
         nombre_completo: editData.nombre_completo,
         correo: editData.correo,
         rol: editData.rol,
-        activo: editData.activo === "true" || editData.activo === true,
+        activo: Boolean(editData.activo),
       });
       cerrarEdicion();
       await cargarUsuarios(searchTerm);
@@ -184,11 +184,11 @@ export const AdminUsuarios = () => {
                 </tr>
               ) : (
                 usuarios.map((u) => (
-                  <tr key={u.id || u.usuario_id} className="hover:bg-gray-50">
+                  <tr key={u.usuario_id} className="hover:bg-gray-50">
                     <td className="px-4 py-4 text-gray-900 font-medium">{u.nombre_completo || u.nombre || "\u2014"}</td>
                     <td className="px-4 py-4 text-gray-600">{u.correo || u.correo_electronico || "\u2014"}</td>
                     <td className="px-4 py-4 text-gray-600">{ROLE_LABELS[u.rol] || u.rol || "\u2014"}</td>
-                    <td className="px-4 py-4 text-gray-600">{u.estado || "Activo"}</td>
+                    <td className="px-4 py-4 text-gray-600">{u.activo ? "Activo" : "Inactivo"}</td>
                     <td className="px-4 py-4 text-gray-600">{formatDate(u.ultimo_acceso || u.fecha_ultimo_acceso)}</td>
                     <td className="px-4 py-4">
                       <div className="flex items-center gap-2">
@@ -199,11 +199,11 @@ export const AdminUsuarios = () => {
                           Editar
                         </button>
                         <button
-                          onClick={() => handleEliminar(u.id || u.usuario_id)}
+                          onClick={() => handleEliminar(u.usuario_id)}
                           className="text-red-600 hover:text-red-800 text-sm font-medium disabled:opacity-50"
-                          disabled={eliminandoId === u.id || eliminandoId === u.usuario_id}
+                          disabled={eliminandoId === u.usuario_id}
                         >
-                          {eliminandoId === u.id || eliminandoId === u.usuario_id ? (
+                          {eliminandoId === u.usuario_id ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <Trash2 className="h-4 w-4" />

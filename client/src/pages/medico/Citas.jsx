@@ -1,4 +1,4 @@
-// src/pages/medico/Citas.jsx - Gestión de citas del médico: listar, cambiar estado
+﻿// src/pages/medico/Citas.jsx - GestiÃ³n de citas del mÃ©dico: listar, cambiar estado
 
 import React, { useState, useEffect, useCallback } from "react";
 import {
@@ -25,7 +25,7 @@ import { pacientesApi } from "../../api/pacientes";
 
 // Funciones de utilidad
 const formatDateTime = (dateStr) => {
-  if (!dateStr) return "—";
+  if (!dateStr) return "â€”";
   const date = new Date(dateStr);
   return date.toLocaleDateString("es-CO", {
     weekday: "short",
@@ -39,7 +39,7 @@ const formatDateTime = (dateStr) => {
 };
 
 const formatTime = (dateStr) => {
-  if (!dateStr) return "—";
+  if (!dateStr) return "â€”";
   const date = new Date(dateStr);
   return date.toLocaleTimeString("es-CO", {
     hour: "2-digit",
@@ -78,7 +78,7 @@ const getEstadoLabel = (estado) => {
     case "Cancelada":
       return "Cancelada";
     case "No-Asistio":
-      return "No asistió";
+      return "No asistiÃ³";
     default:
       return estado;
   }
@@ -104,7 +104,7 @@ const getEstadoIcon = (estado) => {
 // Riesgo ML colors
 const getRiesgoColor = (nivel) => {
   switch (nivel) {
-    case "Crítico":
+    case "CrÃ­tico":
       return "bg-red-100 text-red-800 border border-red-200";
     case "Alto":
       return "bg-orange-100 text-orange-800 border border-orange-200";
@@ -119,7 +119,7 @@ const getRiesgoColor = (nivel) => {
 
 const getRiesgoIcon = (nivel) => {
   switch (nivel) {
-    case "Crítico":
+    case "CrÃ­tico":
       return <ShieldAlert className="h-3 w-3" />;
     case "Alto":
       return <AlertCircle className="h-3 w-3" />;
@@ -160,23 +160,28 @@ const MedicoCitas = () => {
   const [changingState, setChangingState] = useState(null);
   const [riesgos, setRiesgos] = useState({}); // mapa paciente_id -> riesgo
 
-  // Cargar riesgos en batch para los pacientes de las citas cargadas
+  // Cargar riesgos individualmente (el endpoint batch solo autoriza admin/recepcionista;
+  // el mÃ©dico puede consultar el riesgo de cada paciente vÃ­a GET /api/pacientes/:id/riesgo)
   const cargarRiesgosBatch = useCallback(async (citaPacienteIds) => {
     if (!citaPacienteIds.length) return;
     try {
-      const response = await pacientesApi.verRiesgoBatch(citaPacienteIds);
-      const riesgosData = response?.riesgos || response || {};
-      // Convertir a mapa para lookup rápido
       const mapaRiesgos = {};
-      Object.entries(riesgosData).forEach(([pid, riesgo]) => {
-        mapaRiesgos[Number(pid)] = riesgo;
-      });
+      await Promise.all(citaPacienteIds.map(async (pid) => {
+        try {
+          const response = await pacientesApi.verRiesgo(pid);
+          const riesgo = response?.riesgo || response || null;
+          if (riesgo) mapaRiesgos[Number(pid)] = riesgo;
+        } catch (e) {
+          // Fallar en silencio por paciente: no bloquear la carga de citas
+        }
+      }));
       setRiesgos(mapaRiesgos);
     } catch (e) {
       console.warn("No se pudieron cargar riesgos:", e);
       setRiesgos({});
     }
   }, []);
+
 
   const cargarCitas = useCallback(async () => {
     setLoading(true);
@@ -186,7 +191,7 @@ const MedicoCitas = () => {
       const data = response.citas || response.data || response;
       setCitas(data);
 
-      // Extraer IDs de pacientes únicos y cargar sus riesgos
+      // Extraer IDs de pacientes Ãºnicos y cargar sus riesgos
       const pacienteIds = [
         ...new Set((data || []).map((c) => c.paciente_id).filter(Boolean)),
       ];
@@ -259,7 +264,7 @@ const MedicoCitas = () => {
   const handleNoShow = async (citaId) => {
     if (
       !window.confirm(
-        '¿Marcar como "No asistió"? Esta acción no se puede deshacer.',
+        'Â¿Marcar como "No asistiÃ³"? Esta acciÃ³n no se puede deshacer.',
       )
     )
       return;
@@ -272,7 +277,7 @@ const MedicoCitas = () => {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Mis Citas</h1>
           <p className="text-gray-500 mt-1">
-            Gestiona tu agenda médica del día
+            Gestiona tu agenda mÃ©dica del dÃ­a
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -337,7 +342,7 @@ const MedicoCitas = () => {
               <option value="pendiente">Pendiente</option>
               <option value="completada">Completada</option>
               <option value="cancelada">Cancelada</option>
-              <option value="no_asistio">No asistió</option>
+              <option value="no_asistio">No asistiÃ³</option>
             </select>
           </div>
         </div>
@@ -374,10 +379,10 @@ const MedicoCitas = () => {
                       </p>
                       <div className="flex flex-wrap gap-4 text-sm text-gray-500 mt-1">
                         <span className="flex items-center gap-1">
-                          <Clock className="h-4 w-4" /> {cita.hora || "—"}
+                          <Clock className="h-4 w-4" /> {cita.hora || "â€”"}
                         </span>
                         <span className="flex items-center gap-1">
-                          <Stethoscope className="h-4 w-4" /> {cita.sede || "—"}
+                          <Stethoscope className="h-4 w-4" /> {cita.sede || "â€”"}
                         </span>
                       </div>
                       {/* Mostrar riesgo no-show del paciente */}
@@ -388,7 +393,7 @@ const MedicoCitas = () => {
                           {getRiesgoIcon(riesgos[cita.paciente_id].nivel)}
                           {riesgos[cita.paciente_id].nivel}
                           {riesgos[cita.paciente_id].score !== undefined && (
-                            <> • {riesgos[cita.paciente_id].score}/100</>
+                            <> â€¢ {riesgos[cita.paciente_id].score}/100</>
                           )}
                         </span>
                       )}
@@ -433,7 +438,7 @@ const MedicoCitas = () => {
                   {showDetail.paciente || "Paciente"}
                 </h3>
                 <p className="text-gray-500">
-                  {showDetail.sede || ""} ·{" "}
+                  {showDetail.sede || ""} Â·{" "}
                   {showDetail.hora ? selectedDate + " " + showDetail.hora : ""}
                 </p>
               </div>
@@ -449,16 +454,16 @@ const MedicoCitas = () => {
                 <div>
                   <p className="text-sm text-gray-500">DNI</p>
                   <p className="font-medium">
-                    {showDetail.documento_id || "—"}
+                    {showDetail.documento_id || "â€”"}
                   </p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500">Sede</p>
-                  <p className="font-medium">{showDetail.sede || "—"}</p>
+                  <p className="font-medium">{showDetail.sede || "â€”"}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500">Hora</p>
-                  <p className="font-medium">{showDetail.hora || "—"}</p>
+                  <p className="font-medium">{showDetail.hora || "â€”"}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500">Estado</p>
@@ -482,7 +487,7 @@ const MedicoCitas = () => {
                       {getRiesgoIcon(riesgos[showDetail.paciente_id].nivel)}
                       {riesgos[showDetail.paciente_id].nivel}
                       {riesgos[showDetail.paciente_id].score !== undefined && (
-                        <> • {riesgos[showDetail.paciente_id].score}/100</>
+                        <> â€¢ {riesgos[showDetail.paciente_id].score}/100</>
                       )}
                     </span>
                   </div>
@@ -501,7 +506,7 @@ const MedicoCitas = () => {
                   </p>
                   <div className="space-y-2 text-sm">
                     <p>
-                      <strong>Síntomas:</strong>{" "}
+                      <strong>SÃ­ntomas:</strong>{" "}
                       {showDetail.preconsulta.sintomas}
                     </p>
                   </div>

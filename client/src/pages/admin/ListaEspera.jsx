@@ -1,19 +1,22 @@
 ﻿// src/pages/admin/ListaEspera.jsx - Gestion de lista de espera (Administrador/Recepcionista)
 import React, { useState, useEffect, useCallback } from "react";
-import { Calendar, UserPlus, Search, AlertCircle, Loader2, Trash2, Edit3, Clock } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Calendar, Search, AlertCircle, Loader2, Trash2, Edit3, Clock } from "lucide-react";
 import { listaEsperaApi } from "../../api/listaEspera";
 
 const ESTADO_LABELS = {
   Activo: "Activo",
-  Inactivo: "Inactivo",
-  Completado: "Completado",
+  Ofertado: "Ofertado",
+  Asignado: "Asignado",
+  Expirado: "Expirado",
+  Cancelado: "Cancelado",
 };
 
 const ESTADO_COLORS = {
   Activo: "bg-green-100 text-green-800",
-  Inactivo: "bg-gray-100 text-gray-800",
-  Completado: "bg-blue-100 text-blue-800",
+  Ofertado: "bg-blue-100 text-blue-800",
+  Asignado: "bg-purple-100 text-purple-800",
+  Expirado: "bg-orange-100 text-orange-800",
+  Cancelado: "bg-red-100 text-red-800",
 };
 
 const formatDate = (dateStr) => {
@@ -101,13 +104,6 @@ export const AdminListaEspera = () => {
             Administra las inscripciones de pacientes en lista de espera
           </p>
         </div>
-        <Link
-          to="/admin/lista-espera/nuevo"
-          className="inline-flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 transition-colors"
-        >
-          <UserPlus className="h-5 w-5" />
-          Nueva inscripción
-        </Link>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-4">
@@ -131,8 +127,10 @@ export const AdminListaEspera = () => {
           >
             <option value="">Todos los estados</option>
             <option value="Activo">Activo</option>
-            <option value="Inactivo">Inactivo</option>
-            <option value="Completado">Completado</option>
+            <option value="Ofertado">Ofertado</option>
+            <option value="Expirado">Expirado</option>
+            <option value="Cancelado">Cancelado</option>
+            <option value="Asignado">Asignado</option>
           </select>
         </div>
       </div>
@@ -172,14 +170,14 @@ export const AdminListaEspera = () => {
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {lista.map((item) => (
-                  <tr key={item.id || item.espera_id} className="hover:bg-gray-50">
-                    <td className="px-4 py-4 text-gray-900 font-medium">{item.paciente_nombre || item.nombre || "—"}</td>
-                    <td className="px-4 py-4 text-gray-600 capitalize">{item.especialidad_nombre || item.especialidad || "—"}</td>
-                    <td className="px-4 py-4 text-gray-600 capitalize">{item.sede_nombre || item.sede || "—"}</td>
+                  <tr key={item.espera_id} className="hover:bg-gray-50">
+                    <td className="px-4 py-4 text-gray-900 font-medium">{item.nombre_completo || "—"}</td>
+                    <td className="px-4 py-4 text-gray-600 capitalize">{item.especialidad_requerida || "—"}</td>
+                    <td className="px-4 py-4 text-gray-600 capitalize">{item.sede_nombre || "—"}</td>
                     <td className="px-4 py-4 text-gray-600 capitalize">{item.prioridad || "—"}</td>
                     <td className="px-4 py-4">
-                      <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ${ESTADO_COLORS[item.estado] || "bg-gray-100 text-gray-800"}`}>
-                        {ESTADO_LABELS[item.estado] || item.estado}
+                      <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ${ESTADO_COLORS[item.estado_espera] || "bg-gray-100 text-gray-800"}`}>
+                        {ESTADO_LABELS[item.estado_espera] || item.estado_espera}
                       </span>
                     </td>
                     <td className="px-4 py-4 text-gray-600">{formatDate(item.fecha_inscripcion)}</td>
@@ -187,11 +185,11 @@ export const AdminListaEspera = () => {
                     <td className="px-4 py-4">
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => handleEliminar(item.id || item.espera_id)}
-                          disabled={eliminandoId === item.id}
+                          onClick={() => handleEliminar(item.espera_id)}
+                          disabled={eliminandoId === item.espera_id}
                           className="px-3 py-1.5 bg-red-600 text-white text-xs rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors" title="Eliminar"
                         >
-                          {eliminandoId === item.id ? (
+                          {eliminandoId === item.espera_id ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <Trash2 className="h-4 w-4" />
@@ -235,4 +233,5 @@ export const AdminListaEspera = () => {
 };
 
 export default AdminListaEspera;
+
 

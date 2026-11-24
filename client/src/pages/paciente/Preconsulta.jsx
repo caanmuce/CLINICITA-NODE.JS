@@ -15,10 +15,18 @@ import {
 import { citasApi } from "../../api/citas";
 import { fichasPreconsultaApi } from "../../api/fichasPreconsulta";
 
-const formatDateShort = (dateStr) => {
-  if (!dateStr) return "—";
-  const date = new Date(dateStr);
-  return date.toLocaleDateString("es-CO", {
+const BOGOTA_OFFSET = "-05:00";
+
+const toBogotaDate = (fecha, hora) => {
+  if (!fecha) return null;
+  const hhmm = hora || "00:00";
+  return new Date(`${fecha}T${hhmm}:00${BOGOTA_OFFSET}`);
+};
+
+const formatDateShort = (fecha, hora) => {
+  const date = toBogotaDate(fecha, hora);
+  if (!date) return "—";
+  return date.toLocaleString("es-CO", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -28,12 +36,13 @@ const formatDateShort = (dateStr) => {
   });
 };
 
-const canEditPreconsulta = (fechaCita) => {
-  if (!fechaCita) return false;
+const canEditPreconsulta = (fecha, hora) => {
+  if (!fecha) return false;
   const ahora = new Date();
-  const cita = new Date(fechaCita);
+  const cita = toBogotaDate(fecha, hora);
+  if (!cita) return false;
   const diffHours = (cita - ahora) / (1000 * 60 * 60);
-  // Permitir editar hasta 2 horas antes de la cita
+  // Permitir editar hasta 2 horas antes de la cita (fecha + hora)
   return diffHours > 2;
 };
 
@@ -66,7 +75,8 @@ export const PacientePreconsulta = () => {
     setLoading(true);
     try {
       const response = await citasApi.listarMisCitas();
-      const data = response.data || response || [];
+      // El backend devuelve { citas: [...] }
+      const data = response.data?.citas || response.data || [];
       // Filtrar citas que requieren preconsulta (confirmadas, pendientes)
       const citasConPreconsulta = Array.isArray(data)
         ? data.filter((c) =>
@@ -80,7 +90,7 @@ export const PacientePreconsulta = () => {
       // Si hay una cita seleccionada pero ya no está en la lista, deseleccionarla
       if (
         selectedCita &&
-        !citasConPreconsulta.find((c) => c.id === selectedCita.id)
+        !citasConPreconsulta.find((c) => c.cita_id === selectedCita.cita_id)
       ) {
         setSelectedCita(null);
         setFicha(null);
@@ -144,14 +154,14 @@ export const PacientePreconsulta = () => {
 
   useEffect(() => {
     if (selectedCita) {
-      cargarFicha(selectedCita.id);
+      cargarFicha(selectedCita.cita_id);
     } else {
       setFicha(null);
     }
   }, [selectedCita, cargarFicha]);
 
   const handleSelectCita = (cita) => {
-    if (selectedCita?.id === cita.id) {
+    if (selectedCita?.cita_id === cita.cita_id) {
       setSelectedCita(null);
       setFicha(null);
     } else {
@@ -188,7 +198,7 @@ export const PacientePreconsulta = () => {
     setError(null);
     try {
       await fichasPreconsultaApi.crear({
-        cita_id: selectedCita.id,
+        cita_id: selectedCita.cita_id,
         motivo: formData.motivo.trim(),
         sintomas: formData.sintomas.trim(),
         antecedentes: formData.antecedentes.trim(),
@@ -199,7 +209,7 @@ export const PacientePreconsulta = () => {
       });
       setSuccess(true);
       setError(null);
-      await cargarFicha(selectedCita.id);
+      await cargarFicha(selectedCita.cita_id);
     } catch (err) {
       console.error(err);
       setError(err.response?.data?.mensaje || "Error guardando preconsulta");
@@ -260,14 +270,14 @@ export const PacientePreconsulta = () => {
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {citas.map((cita) => {
-              const editable = canEditPreconsulta(cita.fecha);
+              const editable = canEditPreconsulta(cita.fecha, cita.hora);
               return (
                 <button
-                  key={cita.id}
+                  key={cita.cita_id}
                   onClick={() => handleSelectCita(cita)}
                   disabled={!editable}
                   className={`p-4 border-2 rounded-lg text-left transition-colors ${
-                    selectedCita?.id === cita.id
+                    selectedCita?.cita_id === cita.cita_id
                       ? "border-teal-500 bg-teal-50"
                       : editable
                         ? "border-gray-200 hover:border-gray-300"
@@ -278,7 +288,7 @@ export const PacientePreconsulta = () => {
                     <Calendar className="h-6 w-6 text-teal-600" />
                     <div>
                       <p className="font-medium text-gray-900">
-                        {formatDateShort(cita.fecha)}
+                        {formatDateShort(cita.fecha, cita.hora)}
                       </p>
                       <p className="text-sm text-gray-500">
                         {cita.medico_nombre || cita.medico} -{" "}
@@ -305,7 +315,7 @@ export const PacientePreconsulta = () => {
                         No editable (≤2h)
                       </span>
                     )}
-                    {ficha && selectedCita?.id === cita.id && (
+                    {ficha && selectedCita?.cita_id === cita.cita_id && (
                       <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full flex items-center gap-1">
                         <ClipboardCheck className="h-3 w-3" /> Guardada
                       </span>
@@ -323,7 +333,7 @@ export const PacientePreconsulta = () => {
           <div className="flex items-center justify-between mb-6">
             <div>
               <h2 className="text-lg font-semibold text-gray-900">
-                Preconsulta para {formatDateShort(selectedCita.fecha)}
+                Preconsulta para {formatDateShort(selectedCita.fecha, selectedCita.hora)}
               </h2>
               <p className="text-sm text-gray-500 mt-1">
                 {selectedCita.medico_nombre || selectedCita.medico} -{" "}

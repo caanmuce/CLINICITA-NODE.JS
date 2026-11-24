@@ -16,9 +16,9 @@ export const AdminUsuariosNuevo = () => {
   const [formData, setFormData] = useState({
     nombre_completo: "",
     correo: "",
-    password: "",
+    clave: "",
     rol: "",
-    activo: true,
+
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -37,9 +37,9 @@ export const AdminUsuariosNuevo = () => {
       await usuariosApi.crear({
         nombre_completo: formData.nombre_completo,
         correo: formData.correo,
-        password: formData.password,
+        clave: formData.clave,
         rol: formData.rol,
-        activo: formData.activo,
+
       });
       navigate("/admin/usuarios");
     } catch (err) {
@@ -127,19 +127,6 @@ export const AdminUsuariosNuevo = () => {
                 </option>
               ))}
             </select>
-          </div>
-          <div className="flex items-center gap-3">
-            <input
-              id="activo"
-              name="activo"
-              type="checkbox"
-              checked={formData.activo}
-              onChange={handleChange}
-              className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
-            />
-            <label htmlFor="activo" className="text-sm text-gray-700">
-              Usuario activo
-            </label>
           </div>
           <div className="flex justify-end gap-3 pt-4">
             <Link

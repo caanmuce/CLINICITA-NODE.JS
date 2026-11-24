@@ -54,8 +54,7 @@ export const PacientePerfil = () => {
   const loadProfile = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await usuariosApi.obtenerPerfil();
-      const usuario = response.usuario;
+      const usuario = await usuariosApi.obtenerPerfil();
 
       if (usuario) {
         setFormData({
