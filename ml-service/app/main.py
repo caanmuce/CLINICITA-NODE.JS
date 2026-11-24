@@ -26,6 +26,8 @@ async def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> s
     """Valida que la clave X-API-Key coincida con la configurada en el servicio ML."""
     expected = settings.ml_service_secret_key
     if not expected:
+        if os.getenv("DEVELOPER_MODE", "false").lower() == "true":
+            return api_key or "dev-mode"
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Servicio ML no configurado: ML_SERVICE_SECRET_KEY ausente",
@@ -52,13 +54,17 @@ async def lifespan(app: FastAPI):
     pool = get_db_pool()
     feature_builder = FeatureBuilder(pool)
 
-    # Validar que la clave de seguridad del ML esté configurada
+    # Validar que la clave de seguridad del ML esté configurada (excepto en modo desarrollo)
     if not settings.ml_service_secret_key:
-        raise RuntimeError(
-            "FATAL: ML_SERVICE_SECRET_KEY no está configurada. "
-            "Defina la variable de entorno antes de arrancar el servicio ML."
-        )
-    print("[ML] ML_SERVICE_SECRET_KEY configurada correctamente.")
+        if os.getenv("DEVELOPER_MODE", "false").lower() == "true":
+            print("[ML] ADVERTENCIA: ML_SERVICE_SECRET_KEY no está configurada. Modo desarrollo: continuando sin autenticación ML.")
+        else:
+            raise RuntimeError(
+                "FATAL: ML_SERVICE_SECRET_KEY no está configurada. "
+                "Defina la variable de entorno antes de arrancar el servicio ML."
+            )
+    else:
+        print("[ML] ML_SERVICE_SECRET_KEY configurada correctamente.")
 
     # Cargar modelo más reciente
     model_dir = settings.model_dir

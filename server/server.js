@@ -2576,7 +2576,7 @@ app.get("/api/fichas-preconsulta/cita/:cita_id", requireAuth, async (req, res) =
     try {
         const pacienteId = await pacienteIdDeUsuario(req.user.id);
         const fichas = await query(
-            `SELECT f.ficha_id, f.cita_id, f.paciente_id, f.motivo, f.sintomas, f.antecedentes, f.alergias, f.medicamentos, f.signos_vitales, f.enviado, f.fecha_creacion AS fecha_registro
+            `SELECT f.ficha_id, f.cita_id, f.paciente_id, f.motivo, f.sintomas, f.antecedentes, f.alergias, f.medicamentos, f.signos_vitales, f.enviado, f.fecha_registro AS fecha_registro
              FROM fichas_preconsulta f
              WHERE f.cita_id = ?`,
             [cita_id]
@@ -2618,14 +2618,14 @@ app.get("/api/fichas-preconsulta/paciente/:paciente_id", requireAuth, async (req
         }
         if (!autorizado) return res.status(403).json({ mensaje: "No tienes permiso para listar estas fichas" });
         const fichas = await query(
-            `SELECT f.ficha_id, f.cita_id, f.paciente_id, f.motivo, f.sintomas, f.antecedentes, f.alergias, f.medicamentos, f.signos_vitales, f.enviado, f.fecha_creacion AS fecha_registro,
+            `SELECT f.ficha_id, f.cita_id, f.paciente_id, f.motivo, f.sintomas, f.antecedentes, f.alergias, f.medicamentos, f.signos_vitales, f.enviado, f.fecha_registro AS fecha_registro,
                     DATE_FORMAT(c.fecha_cita, '%Y-%m-%d') AS fecha_cita, TIME_FORMAT(c.hora_cita, '%H:%i') AS hora_cita,
                     m.nombre_completo AS medico_nombre, m.especialidad
              FROM fichas_preconsulta f
              JOIN citas c ON c.cita_id = f.cita_id
              JOIN medicos m ON m.medico_id = c.medico_id
              WHERE f.paciente_id = ?
-             ORDER BY f.fecha_creacion DESC`,
+             ORDER BY f.fecha_registro DESC`,
             [paciente_id]
         );
         fichas.forEach((f) => {

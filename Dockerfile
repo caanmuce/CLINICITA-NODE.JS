@@ -1,3 +1,10 @@
+FROM node:20-bookworm-slim AS frontend-builder
+WORKDIR /app/client
+COPY client/package*.json ./
+RUN npm ci
+COPY client/ ./
+RUN npm run build
+
 FROM node:20-bookworm-slim
 
 WORKDIR /app
@@ -27,6 +34,7 @@ RUN npm ci --omit=dev
 
 COPY server ./server
 COPY public ./public
+COPY --from=frontend-builder /app/client/dist ./public
 
 ENV NODE_ENV=production
 EXPOSE 3000

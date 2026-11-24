@@ -8,7 +8,7 @@ from typing import Optional
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=Path(__file__).resolve().parent.parent.parent / ".env",
+        env_file=(".env", "../.env"),
         case_sensitive=False,
         extra="ignore",
         protected_namespaces=(),
