@@ -1,3 +1,5 @@
+SET NAMES utf8mb4;
+
 --
 -- Base de datos: `clinicitabd` (creada)
 --

@@ -1,3 +1,5 @@
+SET NAMES utf8mb4;
+
 USE clinicitabd
 ALTER TABLE lista_espera
     MODIFY estado_espera ENUM('Activo','Ofertado','Asignado','Expirado','Cancelado') DEFAULT 'Activo',
