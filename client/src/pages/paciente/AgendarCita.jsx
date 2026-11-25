@@ -498,9 +498,9 @@ export const PacienteAgendarCita = () => {
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-              {especialidades.map((esp) => (
+              {especialidades.map((esp, idx) => (
                 <button
-                  key={esp.id || esp}
+                  key={typeof esp === "string" ? esp : (esp.id ?? esp.nombre ?? idx)}
 
                   onClick={() =>
                     handleEspecialidadSelect(

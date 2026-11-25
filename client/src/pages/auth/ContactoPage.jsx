@@ -252,42 +252,34 @@ export const LandingPage = () => {
             </div>{" "}
             {/* Desktop Actions */}
             <div className="hidden md:flex items-center gap-3">
-              <Link
-                to="/login"
+              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                <Link
+                  to="/login"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="px-4 py-2.5 text-sm font-medium text-teal-700 border border-teal-300 rounded-lg hover:bg-teal-50 transition-all active:scale-[0.98] flex items-center gap-2"
+                >
+                  <User className="h-4 w-4" aria-hidden="true" />
+                  Iniciar Sesión
+                </Link>
+              </motion.div>
 
-                onClick={() => setIsMobileMenuOpen(false)}
-
-                className="px-4 py-2.5 text-sm font-medium text-teal-700 border border-teal-300 rounded-lg hover:bg-teal-50 transition-all active:scale-[0.98] flex items-center gap-2"
-
-                whileHover={{ scale: 1.02 }}
-
-                whileTap={{ scale: 0.98 }}
-              >
-                <User className="h-4 w-4" aria-hidden="true" />
-                Iniciar Sesión
-              </Link>
-
-              <motion.a
-                as={Link}
-
-                to="/registro"
-
-                onClick={() => setIsMobileMenuOpen(false)}
-
+              <motion.div
                 whileHover={{
                   scale: 1.02,
                   boxShadow: "0 10px 30px -10px rgba(13, 148, 136, 0.5)",
                 }}
-
                 whileTap={{ scale: 0.98 }}
-
-                className="px-5 py-2.5 text-sm font-semibold text-white rounded-lg transition-all shadow-lg shadow-teal-500/30 flex items-center gap-2"
-
-                style={{ backgroundColor: COLORS.teal }}
               >
-                Registrarse Gratis
-                <ArrowRight className="h-4 w-4" aria-hidden="true" />
-              </motion.a>
+                <Link
+                  to="/registro"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="px-5 py-2.5 text-sm font-semibold text-white rounded-lg transition-all shadow-lg shadow-teal-500/30 flex items-center gap-2"
+                  style={{ backgroundColor: COLORS.teal }}
+                >
+                  Registrarse Gratis
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </Link>
+              </motion.div>
             </div>
             {/* Mobile Menu Button */}
             <motion.button
