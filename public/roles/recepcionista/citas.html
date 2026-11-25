@@ -29,11 +29,11 @@
                     <div class="col-md-3">
                         <select class="form-select" name="estado" aria-label="Estado">
                             <option value="">Todos los estados</option>
-                            <option value="pendiente">Pendiente</option>
-                            <option value="confirmada">Confirmada</option>
-                            <option value="cancelada">Cancelada</option>
-                            <option value="atendida">Atendida</option>
-                            <option value="inasistencia">Inasistencia</option>
+                            <option value="Pendiente">Pendiente</option>
+                            <option value="Confirmada">Confirmada</option>
+                            <option value="Cancelada">Cancelada</option>
+                            <option value="Completada">Atendida</option>
+                            <option value="No-Asistio">Inasistencia</option>
                         </select>
                     </div>
                     <div class="col-md-4"><input class="form-control" type="search" name="q" placeholder="Buscar por paciente o documento"></div>
@@ -69,23 +69,6 @@
 </div>
 <script src="../../assets/js/app.js"></script>
 <script>
-document.addEventListener("DOMContentLoaded", () => {
-    const btnBuscar = document.querySelector('#filtros-citas button[type="button"]');
-    if (btnBuscar) {
-        btnBuscar.addEventListener("click", () => {
-            cargarCitasRecepcionista();
-        });
-    }
-    // También permitir Enter en los inputs
-    document.querySelectorAll('#filtros-citas input, #filtros-citas select').forEach(el => {
-        el.addEventListener("keypress", (e) => {
-            if (e.key === "Enter") {
-                e.preventDefault();
-                cargarCitasRecepcionista();
-            }
-        });
-    });
-});
 </script>
 </body>
 </html>

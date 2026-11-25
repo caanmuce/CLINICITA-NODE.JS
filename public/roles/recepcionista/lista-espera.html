@@ -34,16 +34,51 @@
                             <!-- TODO: GET /api/especialidades -->
                         </select>
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-md-2">
                         <select class="form-select" name="prioridad">
-                            <option value="normal">Prioridad normal</option>
+                            <option value="normal" selected>Prioridad media</option>
                             <option value="alta">Prioridad alta</option>
+                            <option value="baja">Prioridad baja</option>
                         </select>
                     </div>
-                    <div class="col-md-2"><button class="btn btn-clinicita w-100" type="submit">Inscribir</button></div>
+                    <div class="col-md-3">
+                        <select class="form-select" name="sede_id" id="lista-sede">
+                            <option value="">Cualquier sede</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <select class="form-select" name="medico_preferido_id" id="lista-medico">
+                            <option value="">Cualquier médico</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3"><input class="form-control" type="date" name="fecha_desde" aria-label="Fecha desde"></div>
+                    <div class="col-md-3"><input class="form-control" type="date" name="fecha_hasta" aria-label="Fecha hasta"></div>
+                    <div class="col-md-3">
+                        <select class="form-select" name="franja_horaria">
+                            <option value="Cualquiera" selected>Cualquier horario</option>
+                            <option value="Manana">Mañana</option>
+                            <option value="Tarde">Tarde</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3"><button class="btn btn-clinicita w-100" type="submit">Inscribir</button></div>
                 </form>
             </div>
-            <div class="panel-card">
+            <div class="panel-card mb-4">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                    <h2 class="h6 mb-0">Solicitudes activas</h2>
+                    <button class="btn btn-outline-secondary btn-sm" type="button" id="btn-recargar-espera"><i class="bi bi-arrow-clockwise me-1"></i>Actualizar</button>
+                </div>
+                <div class="row g-2 mb-3" id="filtros-lista-espera">
+                    <div class="col-md-3"><input class="form-control" id="filtro-espera-q" placeholder="Paciente o documento"></div>
+                    <div class="col-md-3"><select class="form-select" id="filtro-espera-especialidad"><option value="">Todas las especialidades</option></select></div>
+                    <div class="col-md-2"><select class="form-select" id="filtro-espera-sede"><option value="">Todas las sedes</option></select></div>
+                    <div class="col-md-2"><input class="form-control" type="date" id="filtro-espera-desde" aria-label="Fecha desde"></div>
+                    <div class="col-md-2"><input class="form-control" type="date" id="filtro-espera-hasta" aria-label="Fecha hasta"></div>
+                    <div class="col-12 d-flex gap-2">
+                        <button class="btn btn-clinicita btn-sm" type="button" id="btn-filtrar-espera">Filtrar</button>
+                        <button class="btn btn-outline-secondary btn-sm" type="button" id="btn-limpiar-filtros-espera">Limpiar filtros</button>
+                    </div>
+                </div>
                 <div class="table-responsive">
                     <table class="table align-middle">
                         <thead>
@@ -51,7 +86,10 @@
                                 <th>Orden</th>
                                 <th>Paciente</th>
                                 <th>Especialidad</th>
+                                <th>Preferencias</th>
+                                <th>Riesgo no-show</th>
                                 <th>Prioridad</th>
+                                <th>Estado / oferta</th>
                                 <th>Fecha de ingreso</th>
                                 <th>Acciones</th>
                             </tr>
@@ -63,7 +101,22 @@
                 </div>
                 <div class="empty-state">
                     <i class="bi bi-hourglass"></i>
-                    La lista de espera está vacía.
+                    No hay solicitudes que coincidan con los filtros.
+                </div>
+            </div>
+            <div class="panel-card">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                    <div>
+                        <h2 class="h6 mb-1">Historial de ofertas</h2>
+                        <p class="small text-muted mb-0">Ofertas enviadas, aceptadas, rechazadas, vencidas o canceladas.</p>
+                    </div>
+                    <button class="btn btn-outline-secondary btn-sm" type="button" id="btn-recargar-historial-espera">Actualizar historial</button>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead><tr><th>Paciente</th><th>Turno ofrecido</th><th>Médico / sede</th><th>Estado</th><th>Vence</th><th>Respuesta</th><th>Acciones</th></tr></thead>
+                        <tbody id="tabla-historial-ofertas"><tr><td colspan="7" class="text-muted">Cargando historial...</td></tr></tbody>
+                    </table>
                 </div>
             </div>
         </main>

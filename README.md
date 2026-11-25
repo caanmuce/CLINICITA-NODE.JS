@@ -11,7 +11,7 @@
 
 **Sistema web para el control y la gestión inteligente de citas médicas.**
 
-[Descripción](#descripción) · [Funcionalidades](#funcionalidades) · [Instalación](#instalación) · [Ejecución con Docker](#ejecución-con-docker) · [Uso](#uso) · [Estructura](#estructura-del-proyecto) · [ML No-Show Risk Score](#ml-no-show-risk-score-system) · [API](#api-disponible)
+[Descripción](#descripción) · [Funcionalidades](#funcionalidades) · [Instalación](#instalación) · [Ejecución con Docker](#ejecución-con-docker) · [Uso](#uso) · [Estructura](#estructura-del-proyecto) · [ML No-Show Risk Score](#ml-no-show-risk-score-system) · [API](#api-disponible) · [Cambios recientes](#cambios-recientes)
 
 </div>
 
@@ -19,7 +19,7 @@
 
 CliniCita es un proyecto formativo del **SENA** desarrollado para mejorar la administración de citas médicas y reducir el ausentismo. La plataforma centraliza el agendamiento, la consulta de citas, la atención por roles y los recordatorios para ofrecer una experiencia más ordenada a pacientes y personal de salud.
 
-El proyecto combina un frontend web responsive con un servidor **Node.js + Express**, una base de datos **MySQL**, una integración opcional con **WhatsApp**, y un **servicio de Machine Learning (FastAPI + XGBoost)** para predicción de riesgo de inasistencia (no-show). También incluye un chatbot con Google Gemini para clasificar mensajes relacionados con confirmaciones, cancelaciones y síntomas de preconsulta.
+El proyecto combina un frontend web responsive con un servidor **Node.js + Express**, una base de datos **MySQL**, una integración opcional con **WhatsApp**, y un **servicio de Machine Learning (FastAPI + XGBoost)** para predicción de riesgo de inasistencia (no-show). También incluye un chatbot con OmniRoute para clasificar mensajes relacionados con confirmaciones, cancelaciones y síntomas de preconsulta.
 
 ## Objetivos
 
@@ -69,7 +69,7 @@ El proyecto combina un frontend web responsive con un servidor **Node.js + Expre
 - Ejecución periódica de recordatorios con `node-cron`.
 - Vinculación de un WhatsApp ya identificado con el número registrado del paciente mediante documento y últimos cuatro dígitos del teléfono.
 - El chatbot solo responde al número registrado del paciente que tiene la cita; los mensajes de números no asociados se ignoran.
-- Clasificación local de mensajes y clasificación/respuesta opcional con Google Gemini.
+- Clasificación local de mensajes y clasificación/respuesta opcional mediante OmniRoute con el preset `combo-1`.
 - Ficha de preconsulta con síntomas o motivo reportado por el paciente.
 
 ### Machine Learning - No-Show Risk Score
@@ -91,9 +91,9 @@ El proyecto combina un frontend web responsive con un servidor **Node.js + Expre
 | ML Service    | Python 3.11, FastAPI, XGBoost, scikit-learn, MLflow          |
 | Persistencia  | MySQL 8.0, `mysql2` (Node), `pymysql` (Python)               |
 | Autenticación | Tokens HMAC, `crypto.scryptSync` y control de acceso por rol |
-| Mensajería    | `whatsapp-web.js`, `qrcode-terminal`, `node-cron`            |
-| IA opcional   | Google Gemini mediante `@google/genai`                       |
-| Contenedores  | Docker, Docker Compose                                       |
+| Mensajería | `whatsapp-web.js`, `qrcode-terminal`, `node-cron` |
+| IA opcional | OmniRoute mediante API compatible con OpenAI |
+| Contenedores | Docker, Docker Compose |
 
 ## Requisitos
 
@@ -223,10 +223,16 @@ WHATSAPP_CONVERSATION_TTL_MS=14400000
 CLINIC_TIMEZONE=America/Bogota
 CLINIC_UTC_OFFSET=-05:00
 DEBUG=false
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash-lite
+OMNIROUTE_API_KEY=
+OMNIROUTE_BASE_URL=http://localhost:20128/v1
+OMNIROUTE_MODEL=combo-1
 # ML Service
 ML_SERVICE_URL=http://localhost:8000
+# SMS (mock, android_gateway o twilio)
+SMS_PROVIDER=mock
+SMS_GATEWAY_URL=http://192.168.1.100:8080
+SMS_GATEWAY_USER=sms
+SMS_GATEWAY_PASSWORD=
 # Opcional: ruta de Chrome si no se encuentra automáticamente
 # PUPPETEER_EXECUTABLE_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
 ```
@@ -334,24 +340,50 @@ docker compose down -v
 docker compose up -d --build
 ```
 
-`docker compose down -v` elimina los volúmenes `mysql_data`, `mlflow_data` y `ml_models`; úsalo únicamente cuando quieras comenzar desde cero. Después de borrarlos debes ejecutar nuevamente el generador y el entrenamiento.
+`docker compose down -v` elimina los volúmenes `mysql_data`, `mlflow_data` y `whatsapp_auth`; úsalo únicamente cuando quieras comenzar desde cero. El modelo se mantiene en `private-models` y no se elimina con ese comando.
+
+### Despliegue en una VM con Docker
+
+El repositorio es público, por lo que el modelo entrenado y los datos reales de pacientes no deben subirse a GitHub. Antes de iniciar Compose, crea una carpeta privada `private-models` en la raíz y copia allí el archivo `no_show_model_*.pkl`. La carpeta está excluida por `.gitignore` y se monta como `/models` dentro del servicio ML.
+
+Para conservar la sesión de WhatsApp, Compose utiliza el volumen `whatsapp_auth`. Después de iniciar el backend, revisa sus logs y escanea el QR:
+
+```bash
+mkdir -p private-models
+cp /ruta/al/no_show_model_*.pkl private-models/
+docker compose up -d --build
+docker compose logs -f backend
+```
+
+La base actual debe transportarse como un respaldo privado, no dentro del repositorio:
+
+```bash
+docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" clinicitabd < backups/clinicitabd.sql
+```
 
 ### Configuración Docker
 
 Las variables se configuran en `.env`, creado a partir de `.env.docker.example`:
 
-| Variable              | Uso                            | Valor habitual        |
-| --------------------- | ------------------------------ | --------------------- |
-| `MYSQL_ROOT_PASSWORD` | Contraseña de MySQL            | `clinicita123`        |
-| `TOKEN_SECRET`        | Firma de tokens de sesión      | Cambiar en producción |
-| `BACKEND_HOST_PORT`   | Puerto del backend             | `3000`                |
-| `ML_HOST_PORT`        | Puerto público del servicio ML | `8000`                |
-| `MLFLOW_HOST_PORT`    | Puerto público de MLflow       | `5000`                |
-| `MYSQL_HOST_PORT`     | Puerto público de MySQL        | `3307`                |
-| `ENABLE_WHATSAPP`     | Activa WhatsApp                | `false`               |
-| `GEMINI_API_KEY`      | Clave opcional de Gemini       | Vacía                 |
+| Variable | Uso | Valor habitual |
+| --- | --- | --- |
+| `MYSQL_ROOT_PASSWORD` | Contraseña de MySQL | `clinicita123` |
+| `TOKEN_SECRET` | Firma de tokens de sesión | Cambiar en producción |
+| `BACKEND_HOST_PORT` | Puerto del backend | `3000` |
+| `ML_HOST_PORT` | Puerto público del servicio ML | `8000` |
+| `MLFLOW_HOST_PORT` | Puerto público de MLflow | `5000` |
+| `MYSQL_HOST_PORT` | Puerto público de MySQL | `3307` |
+| `ENABLE_WHATSAPP` | Activa WhatsApp | `false` |
+| `OMNIROUTE_API_KEY` | Clave opcional de OmniRoute | Vacía |
+| `OMNIROUTE_BASE_URL` | Endpoint OpenAI-compatible de OmniRoute | `http://localhost:20128/v1` |
+| `SMS_PROVIDER` | Proveedor de SMS (`mock`, `android_gateway`, `twilio`) | `mock` |
+| `SMS_GATEWAY_URL` | URL del Android SMS Gateway | `http://192.168.1.100:8080` |
+| `SMS_GATEWAY_USER` | Usuario Basic Auth del gateway | `sms` |
+| `SMS_GATEWAY_PASSWORD` | Contraseña del gateway | Vacía |
 
 El backend se conecta internamente a `http://ml-service:8000`; desde el navegador se usa `http://localhost:8000`. Por eso no se debe cambiar `ML_SERVICE_URL` a `localhost` dentro del contenedor backend.
+
+Los SMS se envían únicamente para recordatorios de citas dentro de las próximas 24 horas cuyo riesgo sea `Alto` o `Crítico`. El proveedor `mock` solo registra el envío en logs; `android_gateway` usa `POST /message` con autenticación Basic y `twilio` requiere sus credenciales correspondientes.
 
 Para borrar también los datos persistidos y empezar desde cero:
 
@@ -385,7 +417,9 @@ El chatbot se activa por separado:
 ENABLE_WHATSAPP_CHATBOT=true
 ```
 
-La clave `GEMINI_API_KEY` es opcional. Si no está configurada, el sistema utiliza un clasificador local.
+`OMNIROUTE_API_KEY` es opcional. Si no está configurada, el sistema utiliza un clasificador local. Las peticiones usan el modelo/preset `combo-1`.
+
+Para pruebas locales, `DEVELOPER_MODE=true` permite agendar citas de médicos activos en cualquier día y hora futura, sin depender de los horarios configurados. No se activa cuando `NODE_ENV=production`; mantenlo en `false` fuera de entornos de desarrollo.
 
 ### Credenciales de demostración
 
@@ -503,6 +537,10 @@ Las rutas protegidas utilizan un token Bearer generado durante el inicio de sesi
 | `POST` | `/riesgo/batch`         | Scores en lote (máx 100)                         |
 | `POST` | `/train`                | Reentrenamiento en background                    |
 | `POST` | `/recalcular-todos`     | Recalcula y guarda scores de todos los pacientes |
+
+El entrenamiento genera ejemplos a nivel de cita y calcula las variables históricas usando únicamente citas anteriores a la cita objetivo. Esto evita que el resultado de la propia cita se filtre en el entrenamiento. Las variables de contexto de inferencia (`antelacion_dias`, `hora_cita_num`, `dia_semana`, `especialidad` y `medico_id`) se toman de la próxima cita activa; si no existe, se usan valores por defecto.
+
+El cliente ML incorpora un Circuit Breaker local: después de tres fallos de red o HTTP 5xx abre durante 30 segundos y usa el fallback heurístico. Los errores 404 y 409 no abren el circuito.
 
 ## ML No-Show Risk Score System
 
@@ -765,6 +803,25 @@ curl -X POST http://localhost:3000/api/pacientes/riesgo/recalcular-todos \
    GROUP BY canal_envio, estado_entrega;
    ```
 
+#### 8.1. Verificar envío SMS
+
+Para probar sin enviar mensajes reales:
+
+```env
+SMS_PROVIDER=mock
+```
+
+Para Android SMS Gateway:
+
+```env
+SMS_PROVIDER=android_gateway
+SMS_GATEWAY_URL=http://<IP_DEL_GATEWAY>:8080
+SMS_GATEWAY_USER=sms
+SMS_GATEWAY_PASSWORD=<contraseña>
+```
+
+El bot mantiene el estado conversacional y las autorizaciones en `whatsapp_sesiones` con TTL. Las intenciones operativas aceptan sinónimos de confirmar, cancelar y reprogramar; las fechas relativas sin hora exacta solicitan únicamente la hora faltante.
+
 #### 9. Verificar BD - Scores persistidos
 
 ```sql
@@ -794,7 +851,37 @@ ORDER BY FIELD(pr.nivel_riesgo, 'Crítico', 'Alto', 'Medio', 'Bajo');
 
 Abrir [http://localhost:5000](http://localhost:5000) → Experimento `clinicita-no-show-risk` → Último run → Ver métricas (AUC, feature_importance.csv artifact).
 
+### Pruebas rápidas
+
+```bash
+npm run check:node
+npm run check:python
+npm test
+```
+
 ---
+
+## Cambios recientes
+
+### Migración de Gemini a OmniRoute
+- Se reemplazó la dependencia `@google/genai` (Google Gemini) por **OmniRoute**, un gateway compatible con la API de OpenAI.
+- Las variables de entorno cambiaron de `GEMINI_API_KEY` / `GEMINI_MODEL` a `OMNIROUTE_API_KEY` / `OMNIROUTE_BASE_URL` / `OMNIROUTE_MODEL`.
+- El clasificador y el respondedor del chatbot de WhatsApp ahora usan `axios` con el endpoint `/chat/completions` de OmniRoute, modelo/preset `combo-1`.
+- Se actualizaron `.env.example`, `.env.docker.example` y `docker-compose.yml` con las nuevas variables.
+
+### DEVELOPER_MODE para pruebas locales
+- Nueva variable `DEVELOPER_MODE=true` que permite agendar citas de médicos activos en cualquier día y hora futura, sin depender de los horarios registrados.
+- Solo se activa cuando `NODE_ENV` **no** es `production`.
+- Afecta los endpoints `GET /api/horarios` y `POST /api/citas/admin`, así como la función `franjaDelMedico`.
+
+### Mejoras en el chatbot de WhatsApp
+- El respondedor LLM (`responder`) ahora recibe las citas activas del paciente como contexto, permitiendo respuestas más informadas.
+- Cuando el paciente dice "confirmar" o "cancelar" y solo tiene una cita activa, se procesa directamente sin pedir selección.
+- Los mensajes en lenguaje natural desde el menú principal se redirigen automáticamente al agente de IA (sin obligar a elegir la opción "3").
+- Se mejoró el manejo de errores en las llamadas al LLM con logging adicional.
+
+### Datos de ejemplo ampliados
+- Se agregaron horarios de atención para el día **domingo** a todos los médicos de ejemplo en `database/bd.sql`.
 
 ## Estado del proyecto
 

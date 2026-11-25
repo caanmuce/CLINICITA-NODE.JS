@@ -1,20 +1,17 @@
-# Dependencias (se instalan con npm install)
 node_modules/
-
-# Variables locales y secretos: NUNCA subir
 .env
-
-# Logs y archivos temporales
-*.log
-*.tmp
-*.bak
-*~
-.DS_Store
-Thumbs.db
-
-# Sesión de WhatsApp Web (contiene credenciales)
 .wwebjs_auth/
 .wwebjs_cache/
+private-models/
+backups/
 
-# Copias de respaldo locales
-*_respaldo/
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Logs and generated local files
+*.log
+docker-compose
+.github

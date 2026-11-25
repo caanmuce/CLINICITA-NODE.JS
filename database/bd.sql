@@ -5,7 +5,7 @@ DROP DATABASE IF EXISTS clinicitabd;
 
 CREATE DATABASE clinicitabd CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 USE clinicitabd;
-
+  SELECT usuario_id, correo, rol, activo FROM usuarios;
 -- --------------------------------------------------------
 -- Tabla `sedes`
 -- --------------------------------------------------------
@@ -46,6 +46,7 @@ CREATE TABLE `medicos` (
   `usuario_id` int(11) DEFAULT NULL,
   `nombre_completo` varchar(100) NOT NULL,
   `especialidad` varchar(50) NOT NULL,
+  `tarifa` decimal(10,2) NOT NULL DEFAULT 50000.00,
   `correo_institucional` varchar(100) DEFAULT NULL,
   `activo` tinyint(1) NOT NULL DEFAULT 1,
   `fecha_creacion` timestamp NOT NULL DEFAULT current_timestamp(),
@@ -129,16 +130,52 @@ CREATE TABLE `lista_espera` (
   `paciente_id` int(11) NOT NULL,
   `especialidad_requerida` varchar(50) DEFAULT NULL,
   `sede_id` int(11) DEFAULT NULL,
+  `medico_preferido_id` int(11) DEFAULT NULL,
+  `fecha_desde` date DEFAULT NULL,
+  `fecha_hasta` date DEFAULT NULL,
+  `franja_horaria` enum('Manana','Tarde','Cualquiera') NOT NULL DEFAULT 'Cualquiera',
   `fecha_inscripcion` timestamp NOT NULL DEFAULT current_timestamp(),
   `prioridad` enum('Alta','Media','Baja') DEFAULT 'Media',
-  `estado_espera` enum('Activo','Asignado','Expirado') DEFAULT 'Activo',
+  `estado_espera` enum('Activo','Ofertado','Asignado','Expirado','Cancelado') DEFAULT 'Activo',
   `observaciones` text DEFAULT NULL,
   PRIMARY KEY (`espera_id`),
   KEY `paciente_id` (`paciente_id`),
   KEY `fk_lista_espera_sede` (`sede_id`),
   KEY `idx_lista_espera_estado_prioridad` (`estado_espera`, `prioridad`, `fecha_inscripcion`),
   CONSTRAINT `lista_espera_ibfk_1` FOREIGN KEY (`paciente_id`) REFERENCES `pacientes` (`paciente_id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `fk_lista_espera_sede` FOREIGN KEY (`sede_id`) REFERENCES `sedes` (`sede_id`) ON DELETE SET NULL ON UPDATE CASCADE
+  CONSTRAINT `fk_lista_espera_sede` FOREIGN KEY (`sede_id`) REFERENCES `sedes` (`sede_id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_lista_espera_medico_preferido` FOREIGN KEY (`medico_preferido_id`) REFERENCES `medicos` (`medico_id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+-- Tabla `lista_espera_ofertas`
+-- --------------------------------------------------------
+CREATE TABLE `lista_espera_ofertas` (
+  `oferta_id` int(11) NOT NULL AUTO_INCREMENT,
+  `espera_id` int(11) NOT NULL,
+  `paciente_id` int(11) NOT NULL,
+  `medico_id` int(11) NOT NULL,
+  `sede_id` int(11) DEFAULT NULL,
+  `fecha_cita` date NOT NULL,
+  `hora_cita` time NOT NULL,
+  `especialidad` varchar(50) NOT NULL,
+  `estado` enum('Pendiente','Aceptada','Rechazada','Expirada','Cancelada') NOT NULL DEFAULT 'Pendiente',
+  `fecha_oferta` datetime NOT NULL DEFAULT current_timestamp(),
+  `vence_en` datetime NOT NULL,
+  `fecha_respuesta` datetime DEFAULT NULL,
+  `cita_id` int(11) DEFAULT NULL,
+  `slot_reservado` varchar(80) GENERATED ALWAYS AS (CASE WHEN `estado` = 'Pendiente' THEN concat(`medico_id`, '|', `fecha_cita`, '|', `hora_cita`) ELSE NULL END) STORED,
+  `espera_activa` int(11) GENERATED ALWAYS AS (CASE WHEN `estado` = 'Pendiente' THEN `espera_id` ELSE NULL END) STORED,
+  PRIMARY KEY (`oferta_id`),
+  UNIQUE KEY `uq_lista_espera_slot_activo` (`slot_reservado`),
+  UNIQUE KEY `uq_lista_espera_paciente_ofertado` (`espera_activa`),
+  KEY `idx_lista_espera_ofertas_vencimiento` (`estado`, `vence_en`),
+  KEY `idx_lista_espera_ofertas_paciente` (`paciente_id`, `estado`),
+  CONSTRAINT `fk_espera_oferta_espera` FOREIGN KEY (`espera_id`) REFERENCES `lista_espera` (`espera_id`),
+  CONSTRAINT `fk_espera_oferta_paciente` FOREIGN KEY (`paciente_id`) REFERENCES `pacientes` (`paciente_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_espera_oferta_medico` FOREIGN KEY (`medico_id`) REFERENCES `medicos` (`medico_id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_espera_oferta_sede` FOREIGN KEY (`sede_id`) REFERENCES `sedes` (`sede_id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_espera_oferta_cita` FOREIGN KEY (`cita_id`) REFERENCES `citas` (`cita_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- --------------------------------------------------------
@@ -147,7 +184,7 @@ CREATE TABLE `lista_espera` (
 CREATE TABLE `recordatorios` (
   `recordatorio_id` int(11) NOT NULL AUTO_INCREMENT,
   `cita_id` int(11) NOT NULL,
-  `canal_envio` enum('WhatsApp','SMS','Email') DEFAULT 'WhatsApp',
+  `canal_envio` enum('WhatsApp','SMS','Email','WhatsApp+SMS') DEFAULT 'WhatsApp',
   `fecha_envio` datetime DEFAULT NULL,
   `estado_entrega` enum('Pendiente','Enviado','Entregado','Fallido') DEFAULT 'Pendiente',
   `respuesta_paciente` tinyint(1) DEFAULT NULL,
@@ -189,6 +226,19 @@ CREATE TABLE `tokens_recuperacion` (
   KEY `fk_tokens_usuario` (`usuario_id`),
   KEY `idx_tokens_expira` (`expira_en`),
   CONSTRAINT `fk_tokens_usuario` FOREIGN KEY (`usuario_id`) REFERENCES `usuarios` (`usuario_id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+-- Tabla `whatsapp_sesiones` (estado persistente de conversaciones y autorizaciones)
+-- --------------------------------------------------------
+CREATE TABLE `whatsapp_sesiones` (
+  `chat_id` varchar(255) NOT NULL,
+  `tipo` enum('conversacion','autorizacion') NOT NULL,
+  `payload` json NOT NULL,
+  `expira_en` datetime NOT NULL,
+  `actualizado_en` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`chat_id`),
+  KEY `idx_whatsapp_sesiones_expira` (`expira_en`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- --------------------------------------------------------
@@ -252,19 +302,9 @@ ALTER TABLE `tokens_recuperacion` MODIFY `token_id` int(11) NOT NULL AUTO_INCREM
 --
 DELIMITER $$
 
--- Trigger 1: al completar una cita, marca como "Asignado" SOLO las
--- entradas de lista de espera que sigan Activas para ese paciente.
-CREATE TRIGGER trg_actualizar_lista_espera
-AFTER UPDATE ON citas
-FOR EACH ROW
-BEGIN
-    IF NEW.estado = 'Completada' AND OLD.estado <> 'Completada' THEN
-        UPDATE lista_espera
-        SET estado_espera = 'Asignado'
-        WHERE paciente_id = NEW.paciente_id
-          AND estado_espera = 'Activo';
-    END IF;
-END$$
+-- La lista de espera se actualiza desde el servicio de ofertas cuando se confirma
+-- una oferta específica. No se usa un trigger por paciente, porque una cita normal
+-- no debe cerrar otras solicitudes activas del mismo paciente.
 
 -- Trigger 2: crea el recordatorio de WhatsApp pendiente.
 CREATE TRIGGER trg_crear_recordatorio
@@ -311,6 +351,42 @@ BEGIN
 
     IF slot_count = 0 AND NEW.sede_id IS NOT NULL THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'El médico no tiene horario configurado para esta sede y día';
+    END IF;
+END$$
+
+-- Impide que un agendamiento normal tome un horario ofrecido temporalmente.
+CREATE TRIGGER trg_bloquear_cita_sobre_oferta
+BEFORE INSERT ON citas
+FOR EACH ROW
+BEGIN
+    IF NEW.estado NOT IN ('Cancelada', 'No-Asistio') AND EXISTS (
+        SELECT 1 FROM lista_espera_ofertas o
+        WHERE o.medico_id = NEW.medico_id
+          AND o.fecha_cita = NEW.fecha_cita
+          AND o.hora_cita = NEW.hora_cita
+          AND o.estado = 'Pendiente' AND o.vence_en > NOW()
+    ) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Horario reservado temporalmente por una oferta de lista de espera';
+    END IF;
+END$$
+
+CREATE TRIGGER trg_bloquear_actualizacion_cita_sobre_oferta
+BEFORE UPDATE ON citas
+FOR EACH ROW
+BEGIN
+    IF NEW.estado NOT IN ('Cancelada', 'No-Asistio')
+       AND (OLD.estado IN ('Cancelada', 'No-Asistio')
+            OR NEW.medico_id <> OLD.medico_id
+            OR NEW.fecha_cita <> OLD.fecha_cita
+            OR NEW.hora_cita <> OLD.hora_cita)
+       AND EXISTS (
+            SELECT 1 FROM lista_espera_ofertas o
+            WHERE o.medico_id = NEW.medico_id
+              AND o.fecha_cita = NEW.fecha_cita
+              AND o.hora_cita = NEW.hora_cita
+              AND o.estado = 'Pendiente' AND o.vence_en > NOW()
+       ) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Horario reservado temporalmente por una oferta de lista de espera';
     END IF;
 END$$
 
@@ -471,8 +547,9 @@ INSERT INTO pacientes (nombre_completo, documento_id, telefono_whatsapp, correo_
 ('María Torres', '1009876543', '3009876543', 'maria.torres@mail.com', 'Carrera 10 #20-45', '1985-08-22', 'F', 1),
 ('Carlos Ruiz', '1011121314', '3011121314', 'carlos.ruiz@mail.com', 'Av. 68 #40-50', '1992-03-10', 'M', 1);
 
--- Horarios de ejemplo (Lunes a Viernes 8:00-12:00 y 14:00-17:00, slots de 30 min)
+-- Horarios de ejemplo (Lunes a Viernes y Domingo, slots de 30 min)
 -- Dra. Laura Gómez (medico_id=1) - Sede Principal (sede_id=1)
+
 INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, duracion_slot, activo) VALUES
 (1, 1, 1, '08:00:00', '12:00:00', 30, 1), -- Lunes mañana
 (1, 1, 1, '14:00:00', '17:00:00', 30, 1), -- Lunes tarde
@@ -482,7 +559,8 @@ INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, dur
 (1, 1, 3, '14:00:00', '17:00:00', 30, 1), -- Miércoles tarde
 (1, 1, 4, '08:00:00', '12:00:00', 30, 1), -- Jueves mañana
 (1, 1, 4, '14:00:00', '17:00:00', 30, 1), -- Jueves tarde
-(1, 1, 5, '08:00:00', '12:00:00', 30, 1); -- Viernes mañana
+(1, 1, 5, '08:00:00', '12:00:00', 30, 1), -- Viernes mañana
+(1, 1, 0, '08:00:00', '12:00:00', 30, 1); -- Domingo mañana
 
 -- Dr. Andrés Rico (medico_id=2) - Sede Norte (sede_id=2)
 INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, duracion_slot, activo) VALUES
@@ -494,7 +572,8 @@ INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, dur
 (2, 2, 3, '14:00:00', '17:00:00', 30, 1),
 (2, 2, 4, '08:00:00', '12:00:00', 30, 1),
 (2, 2, 4, '14:00:00', '17:00:00', 30, 1),
-(2, 2, 5, '08:00:00', '12:00:00', 30, 1);
+(2, 2, 5, '08:00:00', '12:00:00', 30, 1),
+(2, 2, 0, '08:00:00', '12:00:00', 30, 1);
 
 -- Dra. María Torres (medico_id=3) - Sede Sur (sede_id=3)
 INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, duracion_slot, activo) VALUES
@@ -502,7 +581,8 @@ INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, dur
 (3, 3, 2, '08:00:00', '12:00:00', 30, 1),
 (3, 3, 3, '08:00:00', '12:00:00', 30, 1),
 (3, 3, 4, '08:00:00', '12:00:00', 30, 1),
-(3, 3, 5, '08:00:00', '12:00:00', 30, 1);
+(3, 3, 5, '08:00:00', '12:00:00', 30, 1),
+(3, 3, 0, '08:00:00', '12:00:00', 30, 1);
 
 -- Dr. Carlos Mendoza (medico_id=4) - Sede Principal (sede_id=1)
 INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, duracion_slot, activo) VALUES
@@ -515,10 +595,38 @@ INSERT INTO horarios (medico_id, sede_id, dia_semana, hora_inicio, hora_fin, dur
 (4, 1, 4, '08:00:00', '12:00:00', 30, 1),
 (4, 1, 4, '14:00:00', '17:00:00', 30, 1),
 (4, 1, 5, '08:00:00', '12:00:00', 30, 1),
-(4, 1, 5, '14:00:00', '17:00:00', 30, 1);
+(4, 1, 5, '14:00:00', '17:00:00', 30, 1),
+(4, 1, 0, '08:00:00', '12:00:00', 30, 1),
+(4, 1, 0, '14:00:00', '17:00:00', 30, 1);
 
 -- Lista de espera de ejemplo
 INSERT INTO lista_espera (paciente_id, especialidad_requerida, sede_id, prioridad, estado_espera, observaciones) VALUES
 (1, 'Cardiología', 2, 'Alta', 'Activo', 'Paciente con antecedentes familiares'),
 (2, 'Dermatología', 3, 'Media', 'Activo', NULL),
 (3, 'Pediatría', 1, 'Baja', 'Activo', 'Control rutinario');
+
+  USE clinicitabd;
+  SELECT COUNT(*) FROM medicos;
+  SELECT COUNT(*) FROM sedes;
+  select * from lista_espera;
+
+-- --------------------------------------------------------
+-- Migración idempotente: crear sesiones persistentes de WhatsApp en bases existentes
+CREATE TABLE IF NOT EXISTS `whatsapp_sesiones` (
+  `chat_id` varchar(255) NOT NULL,
+  `tipo` enum('conversacion','autorizacion') NOT NULL,
+  `payload` json NOT NULL,
+  `expira_en` datetime NOT NULL,
+  `actualizado_en` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`chat_id`),
+  KEY `idx_whatsapp_sesiones_expira` (`expira_en`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Migración: ampliar ENUM canal_envio en recordatorios
+-- Ejecutar en bases de datos ya desplegadas que aún tengan
+-- el ENUM original ('WhatsApp','SMS','Email').
+-- --------------------------------------------------------
+ALTER TABLE recordatorios
+  MODIFY COLUMN canal_envio
+    ENUM('WhatsApp','SMS','Email','WhatsApp+SMS')
+    DEFAULT 'WhatsApp';
