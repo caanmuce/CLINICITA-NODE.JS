@@ -193,13 +193,6 @@ export const RecepcionistaDashboard = () => {
                 Gestion de citas, pacientes y agenda del centro medico
               </p>
             </div>
-            <AnimatedButton
-              as="a"
-              href="/recepcionista/citas"
-              icon={<PlusCircle className="h-5 w-5" />}
-            >
-              Nueva cita
-            </AnimatedButton>
           </div>
         </FadeIn>
 

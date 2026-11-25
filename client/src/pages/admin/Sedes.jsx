@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { MapPin, Building, Search, AlertCircle, Loader2, UserPlus } from "lucide-react";
-import { Link } from "react-router-dom";
+import { MapPin, Building, Search, AlertCircle, Loader2, UserPlus, Edit, Trash2 } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import { sedesApi } from "../../api/sedes";
 
 export const AdminSedes = () => {
+  const navigate = useNavigate();
   const [sedes, setSedes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [filtroCiudad, setFiltroCiudad] = useState("");
+  const [eliminandoId, setEliminandoId] = useState(null);
 
   const cargarSedes = useCallback(async () => {
     setLoading(true);
@@ -22,6 +24,24 @@ export const AdminSedes = () => {
       setLoading(false);
     }
   }, []);
+
+  const handleEditar = (id) => {
+    navigate(`/admin/sedes/${id}`);
+  };
+
+  const handleEliminar = async (id) => {
+    if (!window.confirm("¿Está seguro de que desea eliminar esta sede?")) return;
+    setEliminandoId(id);
+    try {
+      await sedesApi.eliminar(id);
+      setSedes((prev) => prev.filter((s) => (s.id || s.sede_id) !== id));
+    } catch (e) {
+      console.error("Error eliminando sede:", e);
+      setError("No se pudo eliminar la sede");
+    } finally {
+      setEliminandoId(null);
+    }
+  };
 
   useEffect(() => {
     cargarSedes();
@@ -91,12 +111,13 @@ export const AdminSedes = () => {
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Direccion</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Telefono</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {sedes.length === 0 ? (
                 <tr>
-                  <td colSpan="5" className="px-4 py-12 text-center text-gray-500">
+                  <td colSpan="6" className="px-4 py-12 text-center text-gray-500">
                     <MapPin className="h-12 w-12 mx-auto text-gray-300 mb-3" />
                     <p>No hay sedes registradas</p>
                   </td>
@@ -109,6 +130,26 @@ export const AdminSedes = () => {
                     <td className="px-4 py-4 text-gray-600">{s.direccion || "\u2014"}</td>
                     <td className="px-4 py-4 text-gray-600">{s.telefono || "\u2014"}</td>
                     <td className="px-4 py-4 text-gray-600">{s.estado || "Activo"}</td>
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleEditar(s.id || s.sede_id)}
+                          disabled={eliminandoId === (s.id || s.sede_id)}
+                          className="px-2 py-1.5 text-xs text-teal-600 hover:text-teal-800 hover:underline border border-transparent rounded hover:bg-teal-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Editar sede"
+                        >
+                          <Edit className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleEliminar(s.id || s.sede_id)}
+                          disabled={eliminandoId === (s.id || s.sede_id)}
+                          className="px-2 py-1.5 text-xs text-red-600 hover:text-red-800 hover:underline border border-transparent rounded hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Eliminar sede"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}

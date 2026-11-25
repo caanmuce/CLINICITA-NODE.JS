@@ -22,6 +22,12 @@ export const pacientesApi = {
     return response.data;
   },
 
+  // POST /api/pacientes (Crear paciente - Recepcionista/Admin)
+  crear: async (data) => {
+    const response = await apiClient.post("/pacientes", data);
+    return response.data;
+  },
+
   // POST /api/pacientes/riesgo/batch (Batch risk para dashboard recepción)
   verRiesgoBatch: async (paciente_ids) => {
     const response = await apiClient.post("/pacientes/riesgo/batch", {

@@ -646,6 +646,133 @@ app.get("/api/medicos", requireAuth, requireRole("paciente", "recepcionista", "a
     res.json({ medicos });
 });
 
+// -------------------- ADMIN: MEDICOS (CRUD) --------------------
+app.post("/api/medicos", requireAuth, requireRole("administrador"), async (req, res) => {
+    try {
+        const { nombre_completo, correo, clave, especialidad, cmp, telefono, sede_id } = req.body;
+
+        if (!nombre_completo || !correo || !clave || !especialidad) {
+            return res.status(400).json({ mensaje: "Nombre completo, correo, contraseña y especialidad son obligatorios" });
+        }
+
+        const email = correo.trim().toLowerCase();
+        const existing = await query("SELECT usuario_id FROM usuarios WHERE correo = ?", [email]);
+        if (existing.length) return res.status(409).json({ mensaje: "Ya existe una cuenta con ese correo" });
+
+        const columnasMedicos = ["nombre_completo", "especialidad", "activo", "tarifa"];
+        const valoresMedicos = [nombre_completo.trim(), especialidad.trim(), 1, 50000.00];
+
+        const colCmp = await query(
+            `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'medicos' AND COLUMN_NAME = 'cmp'`
+        );
+        if (colCmp.length) {
+            columnasMedicos.push("cmp");
+            valoresMedicos.push(cmp || null);
+        }
+        const colTelefono = await query(
+            `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'medicos' AND COLUMN_NAME = 'telefono'`
+        );
+        if (colTelefono.length) {
+            columnasMedicos.push("telefono");
+            valoresMedicos.push(telefono || null);
+        }
+        const colSede = await query(
+            `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'medicos' AND COLUMN_NAME = 'sede_id'`
+        );
+        if (colSede.length) {
+            columnasMedicos.push("sede_id");
+            valoresMedicos.push(sede_id || null);
+        }
+
+        const sqlMedico = `INSERT INTO medicos (${columnasMedicos.join(", ")}) VALUES (${columnasMedicos.map(() => "?").join(", ")})`;
+        const medicoResult = await query(sqlMedico, valoresMedicos);
+        const medicoId = medicoResult.insertId;
+
+        if (!medicoId) throw new Error("No se pudo insertar el médico");
+
+        await query(
+            `INSERT INTO usuarios (nombre_completo, correo, clave_hash, rol, medico_id, activo) VALUES (?, ?, ?, 'medico', ?, 1)`,
+            [nombre_completo.trim(), email, hashPassword(clave), medicoId]
+        );
+
+        res.status(201).json({ mensaje: "Médico creado correctamente", medico_id: medicoId });
+    } catch (error) {
+        console.error("Error creando médico:", error.message);
+        if (error.code === "ER_DUP_ENTRY") return res.status(409).json({ mensaje: "El correo ya está registrado" });
+        res.status(500).json({ mensaje: "No fue posible crear el médico" });
+    }
+});
+
+app.put("/api/medicos/:id", requireAuth, requireRole("administrador"), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { nombre_completo, correo, clave, especialidad, cmp, telefono, sede_id, activo } = req.body;
+
+        const medicos = await query("SELECT medico_id FROM medicos WHERE medico_id = ?", [id]);
+        if (!medicos.length) return res.status(404).json({ mensaje: "Médico no encontrado" });
+
+        const updateFields = [];
+        const updateValues = [];
+        if (nombre_completo !== undefined) { updateFields.push("nombre_completo = ?"); updateValues.push(nombre_completo.trim()); }
+        if (especialidad !== undefined) { updateFields.push("especialidad = ?"); updateValues.push(especialidad.trim()); }
+        if (activo !== undefined) { updateFields.push("activo = ?"); updateValues.push(activo ? 1 : 0); }
+
+        const colCmp = await query(
+            `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'medicos' AND COLUMN_NAME = 'cmp'`
+        );
+        if (colCmp.length && cmp !== undefined) { updateFields.push("cmp = ?"); updateValues.push(cmp || null); }
+        const colTelefono = await query(
+            `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'medicos' AND COLUMN_NAME = 'telefono'`
+        );
+        if (colTelefono.length && telefono !== undefined) { updateFields.push("telefono = ?"); updateValues.push(telefono || null); }
+        const colSede = await query(
+            `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'medicos' AND COLUMN_NAME = 'sede_id'`
+        );
+        if (colSede.length && sede_id !== undefined) { updateFields.push("sede_id = ?"); updateValues.push(sede_id || null); }
+
+        if (updateFields.length) {
+            updateValues.push(id);
+            await query(`UPDATE medicos SET ${updateFields.join(", ")} WHERE medico_id = ?`, updateValues);
+        }
+
+        const usuarios = await query("SELECT usuario_id FROM usuarios WHERE medico_id = ? AND rol = 'medico'", [id]);
+        if (usuarios.length) {
+            const uFields = [];
+            const uValues = [];
+            if (nombre_completo !== undefined) { uFields.push("nombre_completo = ?"); uValues.push(nombre_completo.trim()); }
+            if (correo !== undefined) { uFields.push("correo = ?"); uValues.push(correo.trim().toLowerCase()); }
+            if (clave !== undefined && clave) { uFields.push("clave_hash = ?"); uValues.push(hashPassword(clave)); }
+            if (activo !== undefined) { uFields.push("activo = ?"); uValues.push(activo ? 1 : 0); }
+            if (uFields.length) {
+                uValues.push(usuarios[0].usuario_id);
+                await query(`UPDATE usuarios SET ${uFields.join(", ")} WHERE usuario_id = ?`, uValues);
+            }
+        }
+
+        res.json({ mensaje: "Médico actualizado correctamente" });
+    } catch (error) {
+        console.error("Error actualizando médico:", error.message);
+        res.status(500).json({ mensaje: "No fue posible actualizar el médico" });
+    }
+});
+
+app.delete("/api/medicos/:id", requireAuth, requireRole("administrador"), async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const medicos = await query("SELECT medico_id FROM medicos WHERE medico_id = ?", [id]);
+        if (!medicos.length) return res.status(404).json({ mensaje: "Médico no encontrado" });
+
+        await query("UPDATE medicos SET activo = 0 WHERE medico_id = ?", [id]);
+        await query("UPDATE usuarios SET activo = 0 WHERE medico_id = ? AND rol = 'medico'", [id]);
+
+        res.json({ mensaje: "Médico desactivado correctamente" });
+    } catch (error) {
+        console.error("Error eliminando médico:", error.message);
+        res.status(500).json({ mensaje: "No fue posible eliminar el médico" });
+    }
+});
+
 app.get("/api/horarios", requireAuth, requireRole("paciente", "recepcionista", "administrador"), async (req, res) => {
     const { medico, fecha, sede } = req.query;
     if (!medico || !/^\d{4}-\d{2}-\d{2}$/.test(String(fecha || "")) || Number.isNaN(Date.parse(fecha))) {

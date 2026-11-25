@@ -1,6 +1,7 @@
 ﻿// src/pages/admin/Especialidades.jsx - Listado de especialidades (Administrador)
 import React, { useState, useEffect, useCallback } from "react";
 import { Stethoscope, Search, AlertCircle, Loader2 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { medicosApi } from "../../api/medicos";
 
 export const AdminEspecialidades = () => {
@@ -101,12 +102,12 @@ export const AdminEspecialidades = () => {
                     </td>
                     <td className="px-4 py-4 text-gray-600">{esp.total_medicos || "—"}</td>
                     <td className="px-4 py-4">
-                      <button
-                        className="text-teal-600 hover:text-teal-800 text-sm font-medium"
-                        disabled
-                      >
+                      <Link to={`/admin/medicos?especialidad=${encodeURIComponent(esp.nombre)}`} className="text-teal-600 hover:text-teal-800 text-sm font-medium underline hover:decoration-teal-200">
+
+
+
                         Ver médicos
-                      </button>
+                      </Link>
                     </td>
                   </tr>
                 ))}
@@ -120,4 +121,8 @@ export const AdminEspecialidades = () => {
 };
 
 export default AdminEspecialidades;
+
+
+
+
 

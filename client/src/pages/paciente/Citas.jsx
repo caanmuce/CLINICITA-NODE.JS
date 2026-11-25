@@ -414,12 +414,15 @@ export const PacienteCitas = () => {
                         {["Pendiente", "Confirmada"].includes(cita.estado) && (
                           <>
                             <button
-                              onClick={() => handleCancelar(cita.id)}
-                              disabled={cancelandoId === cita.id || reprogramandoId === cita.id}
+                              onClick={() => handleCancelar(cita.cita_id || cita.id)}
+                              disabled={
+                                cancelandoId === cita.cita_id || cita.id ||
+                                reprogramandoId === cita.cita_id || cita.id
+                              }
                               className="flex items-center gap-1 px-3 py-1.5 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                               title="Cancelar cita"
                             >
-                              {cancelandoId === cita.id ? (
+                              {cancelandoId === cita.cita_id || cita.id ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
                               ) : (
                                 <Trash2 className="h-4 w-4" />

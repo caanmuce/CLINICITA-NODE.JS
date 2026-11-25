@@ -1,6 +1,7 @@
 // src/pages/medico/Pacientes.jsx - Pacientes atendidos por el médico
 import React, { useState, useEffect, useCallback } from "react";
-import { Users, Search, AlertCircle, Loader2 } from "lucide-react";
+import { Users, Search, AlertCircle, Loader2, FileText } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { pacientesApi } from "../../api/pacientes";
 
 const formatDate = (dateStr) => {
@@ -20,6 +21,8 @@ export const MedicoPacientes = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  const navigate = useNavigate();
+
   const cargarPacientes = useCallback(async (q) => {
     setLoading(true);
     setError(null);
@@ -34,6 +37,10 @@ export const MedicoPacientes = () => {
       setLoading(false);
     }
   }, []);
+
+  const handleVerHistorial = (id) => {
+    navigate(`/medico/pacientes/${id}`);
+  };
 
   useEffect(() => {
     cargarPacientes(searchTerm);
@@ -114,7 +121,13 @@ export const MedicoPacientes = () => {
                     <td className="px-4 py-4 text-gray-600">{formatDate(p.ultima_cita || p.fecha_ultima_cita)}</td>
                     <td className="px-4 py-4 text-gray-600">{formatDate(p.proxima_cita || "\u2014")}</td>
                     <td className="px-4 py-4">
-                      <span className="text-xs text-gray-400">Sin acción</span>
+                      <button
+                        onClick={() => handleVerHistorial(p.id || p.paciente_id)}
+                        className="px-2 py-1.5 text-xs text-teal-600 hover:text-teal-800 hover:underline border border-transparent rounded hover:bg-teal-50"
+                        title="Ver historial clínico"
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                      </button>
                     </td>
                   </tr>
                 ))

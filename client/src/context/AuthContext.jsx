@@ -101,7 +101,7 @@ export const AuthProvider = ({ children }) => {
     clearAuthData();
     setUser(null);
     setIsAuthenticated(false);
-    window.location.href = "/login";
+    window.location.href = "/";
   };
 
   return (

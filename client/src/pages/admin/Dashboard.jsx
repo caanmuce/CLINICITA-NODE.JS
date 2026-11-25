@@ -179,7 +179,7 @@ export const AdminDashboard = () => {
     },
     {
       label: "Ver citas",
-      href: "/admin/citas",
+      href: "/admin/reportes",
       icon: Calendar,
       color: "bg-teal-600 hover:bg-teal-700",
     },
@@ -203,7 +203,7 @@ export const AdminDashboard = () => {
     },
     {
       label: "Configuración",
-      href: "/admin/configuracion",
+      href: "/admin/usuarios",
       icon: HeartPulse,
       color: "bg-purple-600 hover:bg-purple-700",
     },
@@ -371,7 +371,6 @@ export const AdminDashboard = () => {
               <li>
                 Pendiente backend: Ingresos mes (requiere modulo facturacion)
               </li>
-              <li>Sin ruta: Configuracion (/admin/configuracion no existe)</li>
             </ul>
           </AnimatedCard>
         </FadeIn>

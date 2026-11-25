@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Stethoscope, UserPlus, Search, AlertCircle, Loader2 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Stethoscope, UserPlus, Search, AlertCircle, Loader2, Edit, Trash2, AlertTriangle } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import { medicosApi } from "../../api/medicos";
 
 export const AdminMedicos = () => {
+  const navigate = useNavigate();
   const [medicos, setMedicos] = useState([]);
   const [especialidadFilter, setEspecialidadFilter] = useState("");
   const [especialidades, setEspecialidades] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [eliminandoId, setEliminandoId] = useState(null);
+  const [eliminarConfirm, setEliminarConfirm] = useState(null);
 
   const cargarMedicos = useCallback(async (especialidad) => {
     setLoading(true);
@@ -32,6 +35,24 @@ export const AdminMedicos = () => {
       console.error("Error cargando especialidades:", e);
     }
   }, []);
+
+  const handleEditar = (id) => {
+    navigate(`/admin/medicos/${id}`);
+  };
+
+  const handleEliminar = async (id) => {
+    if (!window.confirm("¿Está seguro de que desea eliminar este médico?")) return;
+    setEliminandoId(id);
+    try {
+      await medicosApi.eliminar(id);
+      setMedicos((prev) => prev.filter((m) => (m.id || m.medico_id) !== id));
+    } catch (e) {
+      console.error("Error eliminando medico:", e);
+      setError("No se pudo eliminar el médico");
+    } finally {
+      setEliminandoId(null);
+    }
+  };
 
   useEffect(() => {
     cargarEspecialidades();
@@ -131,7 +152,24 @@ export const AdminMedicos = () => {
                     <td className="px-4 py-4 text-gray-600">{m.sede_nombre || "\u2014"}</td>
                     <td className="px-4 py-4 text-gray-600">{m.estado || "Activo"}</td>
                     <td className="px-4 py-4">
-                      <span className="text-xs text-gray-400">Sin acción</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleEditar(m.id || m.medico_id)}
+                          disabled={eliminandoId === (m.id || m.medico_id)}
+                          className="px-2 py-1.5 text-xs text-teal-600 hover:text-teal-800 hover:underline border border-transparent rounded hover:bg-teal-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Editar médico"
+                        >
+                          <Edit className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleEliminar(m.id || m.medico_id)}
+                          disabled={eliminandoId === (m.id || m.medico_id)}
+                          className="px-2 py-1.5 text-xs text-red-600 hover:text-red-800 hover:underline border border-transparent rounded hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Eliminar médico"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))

@@ -15,6 +15,7 @@ import {
   Building,
   BarChart,
   ArrowLeft,
+  Settings,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -30,18 +31,21 @@ const menuItems = {
     },
     { path: "/paciente/preconsulta", label: "Pre-consulta", icon: Stethoscope },
     { path: "/paciente/perfil", label: "Mi Perfil", icon: User },
+    { path: "/paciente/configuracion", label: "Configuración", icon: Settings },
   ],
   medico: [
     { path: "/medico", label: "Dashboard", icon: Home },
     { path: "/medico/agenda", label: "Mi Agenda", icon: Calendar },
     { path: "/medico/citas", label: "Mis Citas", icon: FileText },
     { path: "/medico/pacientes", label: "Pacientes", icon: Users },
+    { path: "/medico/configuracion", label: "Configuración", icon: Settings },
   ],
   recepcionista: [
     { path: "/recepcionista", label: "Dashboard", icon: Home },
     { path: "/recepcionista/citas", label: "Gestión Citas", icon: Calendar },
     { path: "/recepcionista/pacientes", label: "Pacientes", icon: Users },
     { path: "/recepcionista/horarios", label: "Horarios", icon: Clock },
+    { path: "/recepcionista/configuracion", label: "Configuración", icon: Settings },
   ],
   administrador: [
     { path: "/admin", label: "Dashboard", icon: Home },
@@ -52,6 +56,7 @@ const menuItems = {
     { path: "/admin/lista-espera", label: "Lista de Espera", icon: Calendar },
     { path: "/admin/especialidades", label: "Especialidades", icon: Stethoscope },
     { path: "/admin/horarios", label: "Horarios", icon: Clock },
+    { path: "/admin/configuracion", label: "Configuración", icon: Settings },
   ],
 };
 

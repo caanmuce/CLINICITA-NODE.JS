@@ -33,6 +33,24 @@ export const medicosApi = {
     const response = await apiClient.get("/especialidades");
     return response.data.especialidades || [];
   },
+
+  // POST /api/medicos (Crear médico - Admin)
+  crear: async (data) => {
+    const response = await apiClient.post("/medicos", data);
+    return response.data;
+  },
+
+  // PUT /api/medicos/:id (Actualizar médico - Admin)
+  actualizar: async (id, data) => {
+    const response = await apiClient.put(`/medicos/${id}`, data);
+    return response.data;
+  },
+
+  // DELETE /api/medicos/:id (Eliminar médico - Admin)
+  eliminar: async (id) => {
+    const response = await apiClient.delete(`/medicos/${id}`);
+    return response.data;
+  },
 };
 
 export default medicosApi;

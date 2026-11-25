@@ -38,11 +38,18 @@ import { AdminDashboard } from "../pages/admin/Dashboard";
 import { AdminUsuarios } from "../pages/admin/Usuarios";
 import { AdminUsuariosNuevo } from "../pages/admin/UsuariosNuevo";
 import { AdminMedicos } from "../pages/admin/Medicos";
+import { AdminMedicosNuevo } from "../pages/admin/MedicosNuevo";
 import { AdminSedes } from "../pages/admin/Sedes";
+import { AdminSedesNuevo } from "../pages/admin/SedesNuevo";
 import { AdminReportes } from "../pages/admin/Reportes";
 import { AdminListaEspera } from "../pages/admin/ListaEspera";
 import { AdminEspecialidades } from "../pages/admin/Especialidades";
 import { AdminHorarios } from "../pages/admin/Horarios";
+import { PacienteConfiguracion } from "../pages/paciente/Configuracion";
+import { MedicoConfiguracion } from "../pages/medico/Configuracion";
+import { RecepcionistaConfiguracion } from "../pages/recepcionista/Configuracion";
+import { AdminConfiguracion } from "../pages/admin/Configuracion";
+import { RecepcionistaPacientesNuevo } from "../pages/recepcionista/PacientesNuevo";
 function AppRoutes() {
   const { user, loading, isAuthenticated } = useAuth();
 
@@ -73,6 +80,7 @@ function AppRoutes() {
           <Route path="paciente/lista-espera" element={<PacienteListaEspera />} />
           <Route path="paciente/preconsulta" element={<PacientePreconsulta />} />
           <Route path="paciente/perfil" element={<PacientePerfil />} />
+          <Route path="paciente/configuracion" element={<PacienteConfiguracion />} />
         </Route>
 
         {/* MEDICO routes */}
@@ -88,6 +96,7 @@ function AppRoutes() {
           <Route path="medico/agenda" element={<MedicoAgenda />} />
           <Route path="medico/citas" element={<MedicoCitas />} />
           <Route path="medico/pacientes" element={<MedicoPacientes />} />
+          <Route path="medico/configuracion" element={<MedicoConfiguracion />} />
         </Route>
 
         {/* RECEPCIONISTA routes */}
@@ -102,8 +111,10 @@ function AppRoutes() {
           <Route path="recepcionista/dashboard" element={<RecepcionistaDashboard />} />
           <Route path="recepcionista/citas" element={<RecepcionistaCitas />} />
           <Route path="recepcionista/pacientes" element={<RecepcionistaPacientes />} />
+          <Route path="recepcionista/pacientes/nuevo" element={<RecepcionistaPacientesNuevo />} />
           <Route path="recepcionista/horarios" element={<RecepcionistaHorarios />} />
           <Route path="recepcionista/recordatorios" element={<RecepcionistaRecordatorios />} />
+          <Route path="recepcionista/configuracion" element={<RecepcionistaConfiguracion />} />
         </Route>
 
         {/* ADMINISTRADOR routes */}
@@ -119,11 +130,14 @@ function AppRoutes() {
           <Route path="admin/usuarios" element={<AdminUsuarios />} />
           <Route path="admin/usuarios/nuevo" element={<AdminUsuariosNuevo />} />
           <Route path="admin/medicos" element={<AdminMedicos />} />
+          <Route path="admin/medicos/nuevo" element={<AdminMedicosNuevo />} />
           <Route path="admin/sedes" element={<AdminSedes />} />
+          <Route path="admin/sedes/nuevo" element={<AdminSedesNuevo />} />
           <Route path="admin/reportes" element={<AdminReportes />} />
           <Route path="admin/lista-espera" element={<AdminListaEspera />} />
           <Route path="admin/especialidades" element={<AdminEspecialidades />} />
           <Route path="admin/horarios" element={<AdminHorarios />} />
+          <Route path="admin/configuracion" element={<AdminConfiguracion />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

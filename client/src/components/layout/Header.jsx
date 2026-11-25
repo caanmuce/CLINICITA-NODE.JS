@@ -28,6 +28,13 @@ export const Header = ({ onMenuClick }) => {
     administrador: "/admin/configuracion",
   };
 
+  const RUTAS_DASHBOARD = {
+    paciente: "/paciente/dashboard",
+    medico: "/medico/dashboard",
+    recepcionista: "/recepcionista/dashboard",
+    administrador: "/admin/dashboard",
+  };
+
   const rol = user?.rol?.toLowerCase() || "paciente";
 
   const irPerfil = () => {
@@ -184,17 +191,6 @@ export const Header = ({ onMenuClick }) => {
                 >
                   <Settings className="h-4 w-4" />
                   Configuración
-                </motion.button>
-                <motion.button
-                  onClick={() => {
-                    navigate("/");
-                    setIsDropdownOpen(false);
-                  }}
-                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
-                  whileHover={{ x: 4 }}
-                >
-                  <Home className="h-4 w-4" />
-                  Volver a inicio
                 </motion.button>
                 <hr className="my-1 border-gray-200" />
                 <motion.button

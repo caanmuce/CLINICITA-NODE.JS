@@ -2,9 +2,11 @@
 
 import React, { useState, useEffect } from "react";
 
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { motion, AnimatePresence } from "framer-motion";
+
+import { useAuth } from "../../context/AuthContext";
 
 import {
   HeartPulse,
@@ -46,6 +48,7 @@ import {
   ExternalLink,
   MessageSquare,
   Send,
+  LogOut,
 } from "lucide-react";
 
 const COLORS = {
@@ -82,6 +85,8 @@ const scrollToSection = (id) => {
 };
 
 export const LandingPage = () => {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const [isScrolled, setIsScrolled] = useState(false);
@@ -252,42 +257,91 @@ export const LandingPage = () => {
             </div>{" "}
             {/* Desktop Actions */}
             <div className="hidden md:flex items-center gap-3">
-              <Link
-                to="/login"
+              {user ? (
+                <>
+                  <Link
+                    to="/paciente/dashboard"
+                    onClick={() => {
+                      setIsMobileMenuOpen(false);
+                      navigate(user?.rol?.toLowerCase() === "medico"
+                        ? "/medico/dashboard"
+                        : user?.rol?.toLowerCase() === "recepcionista"
+                          ? "/recepcionista/dashboard"
+                          : user?.rol?.toLowerCase() === "administrador"
+                            ? "/admin/dashboard"
+                            : "/paciente/dashboard");
+                    }}
+                    className="px-4 py-2.5 text-sm font-medium text-teal-700 border border-teal-300 rounded-lg hover:bg-teal-50 transition-all active:scale-[0.98] flex items-center gap-2"
 
-                onClick={() => setIsMobileMenuOpen(false)}
+                    whileHover={{ scale: 1.02 }}
 
-                className="px-4 py-2.5 text-sm font-medium text-teal-700 border border-teal-300 rounded-lg hover:bg-teal-50 transition-all active:scale-[0.98] flex items-center gap-2"
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    <User className="h-4 w-4" aria-hidden="true" />
+                    Mi Dashboard
+                  </Link>
 
-                whileHover={{ scale: 1.02 }}
+                  <motion.button
+                    onClick={() => {
+                      logout();
+                      setIsMobileMenuOpen(false);
+                    }}
 
-                whileTap={{ scale: 0.98 }}
-              >
-                <User className="h-4 w-4" aria-hidden="true" />
-                Iniciar Sesión
-              </Link>
+                    whileHover={{
+                      scale: 1.02,
+                      boxShadow: "0 10px 30px -10px rgba(220, 38, 38, 0.5)",
+                    }}
 
-              <motion.a
-                as={Link}
+                    whileTap={{ scale: 0.98 }}
 
-                to="/registro"
+                    className="px-5 py-2.5 text-sm font-semibold text-white rounded-lg transition-all shadow-lg shadow-red-500/30 flex items-center gap-2"
 
-                onClick={() => setIsMobileMenuOpen(false)}
+                    style={{ backgroundColor: "#DC2626" }}
+                  >
+                    <LogOut className="h-4 w-4" aria-hidden="true" />
+                    Cerrar Sesión
+                  </motion.button>
+                </>
+              ) : (
+                <>
+                  <Link
+                    to="/login"
 
-                whileHover={{
-                  scale: 1.02,
-                  boxShadow: "0 10px 30px -10px rgba(13, 148, 136, 0.5)",
-                }}
+                    onClick={() => setIsMobileMenuOpen(false)}
 
-                whileTap={{ scale: 0.98 }}
+                    className="px-4 py-2.5 text-sm font-medium text-teal-700 border border-teal-300 rounded-lg hover:bg-teal-50 transition-all active:scale-[0.98] flex items-center gap-2"
 
-                className="px-5 py-2.5 text-sm font-semibold text-white rounded-lg transition-all shadow-lg shadow-teal-500/30 flex items-center gap-2"
+                    whileHover={{ scale: 1.02 }}
 
-                style={{ backgroundColor: COLORS.teal }}
-              >
-                Registrarse Gratis
-                <ArrowRight className="h-4 w-4" aria-hidden="true" />
-              </motion.a>
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    <User className="h-4 w-4" aria-hidden="true" />
+                    Iniciar Sesión
+                  </Link>
+
+                  <motion.a
+                    as={Link}
+
+                    to="/registro"
+
+                    onClick={() => setIsMobileMenuOpen(false)}
+
+                    whileHover={{
+                      scale: 1.02,
+                      boxShadow: "0 10px 30px -10px rgba(13, 148, 136, 0.5)",
+                    }}
+
+                    whileTap={{ scale: 0.98 }}
+
+                    className="px-5 py-2.5 text-sm font-semibold text-white rounded-lg transition-all shadow-lg shadow-teal-500/30 flex items-center gap-2"
+
+                    style={{ backgroundColor: COLORS.teal }}
+                  >
+                    Registrarse Gratis
+                    <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  </motion.a>
+                </>
+              )}
             </div>
             {/* Mobile Menu Button */}
             <motion.button
@@ -358,35 +412,79 @@ export const LandingPage = () => {
 
                     className="pt-2 border-t border-teal-100 flex flex-col gap-2"
                   >
-                    <Link
-                      to="/login"
+                    {user ? (
+                      <>
+                        <Link
+                          to="/paciente/dashboard"
+                          onClick={() => {
+                            setIsMobileMenuOpen(false);
+                            navigate(
+                              user?.rol?.toLowerCase() === "medico"
+                                ? "/medico/dashboard"
+                                : user?.rol?.toLowerCase() === "recepcionista"
+                                  ? "/recepcionista/dashboard"
+                                  : user?.rol?.toLowerCase() === "administrador"
+                                    ? "/admin/dashboard"
+                                    : "/paciente/dashboard",
+                            );
+                          }}
+                          className="px-4 py-3 text-base font-medium text-teal-700 border border-teal-300 rounded-lg text-center hover:bg-teal-50 transition-colors flex items-center justify-center gap-2"
+                        >
+                          <User className="h-4 w-4" aria-hidden="true" />
+                          Mi Dashboard
+                        </Link>
 
-                      onClick={() => setIsMobileMenuOpen(false)}
+                        <motion.button
+                          onClick={() => {
+                            logout();
+                            setIsMobileMenuOpen(false);
+                          }}
 
-                      className="px-4 py-3 text-base font-medium text-teal-700 border border-teal-300 rounded-lg text-center hover:bg-teal-50 transition-colors flex items-center justify-center gap-2"
-                    >
-                      <User className="h-4 w-4" aria-hidden="true" />
-                      Iniciar Sesión
-                    </Link>
+                          whileHover={{ scale: 1.01 }}
 
-                    <motion.a
-                      as={Link}
+                          whileTap={{ scale: 0.99 }}
 
-                      to="/registro"
+                          className="px-4 py-3 text-base font-semibold text-white rounded-lg text-center transition-colors shadow-lg shadow-red-500/30 flex items-center justify-center gap-2"
 
-                      onClick={() => setIsMobileMenuOpen(false)}
+                          style={{ backgroundColor: "#DC2626" }}
+                        >
+                          <LogOut className="h-4 w-4" aria-hidden="true" />
+                          Cerrar Sesión
+                        </motion.button>
+                      </>
+                    ) : (
+                      <>
+                        <Link
+                          to="/login"
 
-                      whileHover={{ scale: 1.01 }}
+                          onClick={() => setIsMobileMenuOpen(false)}
 
-                      whileTap={{ scale: 0.99 }}
+                          className="px-4 py-3 text-base font-medium text-teal-700 border border-teal-300 rounded-lg text-center hover:bg-teal-50 transition-colors flex items-center justify-center gap-2"
+                        >
+                          <User className="h-4 w-4" aria-hidden="true" />
+                          Iniciar Sesión
+                        </Link>
 
-                      className="px-4 py-3 text-base font-semibold text-white rounded-lg text-center transition-colors shadow-lg shadow-teal-500/30 flex items-center justify-center gap-2"
+                        <motion.a
+                          as={Link}
 
-                      style={{ backgroundColor: COLORS.teal }}
-                    >
-                      Registrarse Gratis
-                      <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                    </motion.a>
+                          to="/registro"
+
+                          onClick={() => setIsMobileMenuOpen(false)}
+
+                          whileHover={{ scale: 1.01 }}
+
+                          whileTap={{ scale: 0.99 }}
+
+                          className="px-4 py-3 text-base font-semibold text-white rounded-lg text-center transition-colors shadow-lg shadow-teal-500/30 flex items-center justify-center gap-2"
+
+                          style={{ backgroundColor: COLORS.teal }}
+                        >
+                          Registrarse Gratis
+                          <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                        </motion.a>
+                      </>
+                    )}
                   </motion.div>
                 </div>
               </motion.div>
