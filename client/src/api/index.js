@@ -1,0 +1,12 @@
+export { default as authApi } from "./auth";
+export { default as citasApi } from "./citas";
+export { default as pacientesApi } from "./pacientes";
+export { default as medicosApi } from "./medicos";
+export { default as horariosApi } from "./horarios";
+export { default as sedesApi } from "./sedes";
+export { default as listaEsperaApi } from "./listaEspera";
+export { default as recordatoriosApi } from "./recordatorios";
+export { default as usuariosApi } from "./usuarios";
+export { default as reportesApi } from "./reportes";
+export { default as fichasPreconsultaApi } from "./fichasPreconsulta";
+export { default as apiClient } from "./apiClient";

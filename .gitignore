@@ -14,4 +14,12 @@ __pycache__/
 # Logs and generated local files
 *.log
 docker-compose
-.github
+
+# Build artifacts (frontend build output - regenerado con npm run build)
+public/assets/
+public/index.html
+public/favicon.svg
+public/icons.svg
+
+# Legacy build folder (no longer used - Vite outputs to public/)
+dist/
