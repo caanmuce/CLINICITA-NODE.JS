@@ -831,7 +831,8 @@ const schemas = {
         clave: z.string().min(6).max(50),
         rol: z.enum(["paciente", "medico", "recepcionista", "administrador"]),
         paciente_id: z.number().int().positive().optional(),
-        medico_id: z.number().int().positive().optional()
+        medico_id: z.number().int().positive().optional(),
+        especialidad: z.string().max(100).optional()
     }),
     actualizarUsuario: z.object({
         nombre_completo: z.string().min(2).max(100).optional(),
@@ -1120,11 +1121,17 @@ app.get("/api/usuarios", requireAuth, requireRole("administrador"), async (req, 
 
 app.post("/api/usuarios", requireAuth, requireRole("administrador"), validar(schemas.crearUsuario), async (req, res) => {
     try {
-        const { nombre_completo, correo, clave, rol, paciente_id, medico_id } = req.validated;
+        const { nombre_completo, correo, clave, rol, paciente_id, medico_id, especialidad } = req.validated;
         const email = correo.trim().toLowerCase();
 
         const existing = await query("SELECT usuario_id FROM usuarios WHERE correo = ?", [email]);
         if (existing.length) return res.status(409).json({ mensaje: "Ya existe un usuario con ese correo" });
+
+                if (rol === "medico" && !medico_id) {
+            if (!especialidad) return res.status(400).json({ mensaje: "Un médico necesita una especialidad" });
+            const esp = await query("SELECT nombre FROM especialidades WHERE nombre = ? AND activo = 1", [especialidad]);
+            if (!esp.length) return res.status(400).json({ mensaje: "La especialidad no existe o está inactiva" });
+        }
 
         const result = await query(
             `INSERT INTO usuarios (nombre_completo, correo, clave_hash, rol, paciente_id, medico_id)
@@ -1132,9 +1139,19 @@ app.post("/api/usuarios", requireAuth, requireRole("administrador"), validar(sch
             [nombre_completo.trim(), email, hashPassword(clave), rol, paciente_id || null, medico_id || null]
         );
 
-        // Si es médico, crear registro en medicos si no existe
-        if (rol === "medico" && medico_id) {
-            await query("UPDATE medicos SET usuario_id = ? WHERE medico_id = ?", [result.insertId, medico_id]);
+               // Si es médico: se crea su fila en `medicos` (si no llegó medico_id) y se vincula con el usuario.
+        if (rol === "medico") {
+            let mid = medico_id || null;
+            if (!mid) {
+                const med = await query(
+                    "INSERT INTO medicos (nombre_completo, especialidad, correo_institucional, usuario_id) VALUES (?, ?, ?, ?)",
+                    [nombre_completo.trim(), especialidad, email, result.insertId]
+                );
+                mid = med.insertId;
+            } else {
+                await query("UPDATE medicos SET usuario_id = ? WHERE medico_id = ?", [result.insertId, mid]);
+            }
+            await query("UPDATE usuarios SET medico_id = ? WHERE usuario_id = ?", [mid, result.insertId]);
         }
 
         res.status(201).json({ mensaje: "Usuario creado correctamente", usuario_id: result.insertId });
