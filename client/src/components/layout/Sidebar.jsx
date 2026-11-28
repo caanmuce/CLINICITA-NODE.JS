@@ -22,7 +22,7 @@ import { motion, AnimatePresence } from "framer-motion";
 
 const menuItems = {
   paciente: [
-    { path: "/paciente", label: "Dashboard", icon: Home },
+    { path: "/paciente", label: "Inicio", icon: Home },
     { path: "/paciente/citas", label: "Mis Citas", icon: Calendar },
     { path: "/paciente/agendar", label: "Agendar Cita", icon: Clock },
     {
@@ -35,21 +35,21 @@ const menuItems = {
     { path: "/paciente/configuracion", label: "Configuración", icon: Settings },
   ],
   medico: [
-    { path: "/medico", label: "Dashboard", icon: Home },
+    { path: "/medico", label: "Inicio", icon: Home },
     { path: "/medico/agenda", label: "Mi Agenda", icon: Calendar },
     { path: "/medico/citas", label: "Mis Citas", icon: FileText },
     { path: "/medico/pacientes", label: "Pacientes", icon: Users },
     { path: "/medico/configuracion", label: "Configuración", icon: Settings },
   ],
   recepcionista: [
-    { path: "/recepcionista", label: "Dashboard", icon: Home },
+    { path: "/recepcionista", label: "Inicio", icon: Home },
     { path: "/recepcionista/citas", label: "Gestión Citas", icon: Calendar },
     { path: "/recepcionista/pacientes", label: "Pacientes", icon: Users },
     { path: "/recepcionista/horarios", label: "Horarios", icon: Clock },
     { path: "/recepcionista/configuracion", label: "Configuración", icon: Settings },
   ],
   administrador: [
-    { path: "/admin", label: "Dashboard", icon: Home },
+    { path: "/admin", label: "Inicio", icon: Home },
     { path: "/admin/usuarios", label: "Usuarios", icon: Users },
     { path: "/admin/medicos", label: "Médicos", icon: Stethoscope },
     { path: "/admin/sedes", label: "Sedes", icon: Building },
@@ -225,3 +225,4 @@ export const Sidebar = ({ collapsed = false, onToggle }) => {
     </aside>
   );
 };
+
