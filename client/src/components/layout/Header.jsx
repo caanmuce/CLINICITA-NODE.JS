@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { Link, useNavigate } from "react-router-dom";
-import { Menu, Bell, User, ChevronDown, LogOut, Settings, HeartPulse, Home } from "lucide-react";
+import { Menu, Bell, User, ChevronDown, LogOut, Settings, Home } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 export const Header = ({ onMenuClick }) => {
@@ -90,13 +90,6 @@ export const Header = ({ onMenuClick }) => {
           }}
           className="flex items-center gap-2 cursor-pointer"
         >
-          <motion.div
-            whileHover={{ scale: 1.1, rotate: 5 }}
-            whileTap={{ scale: 0.95 }}
-            className="p-3 rounded-2xl bg-gradient-to-br from-teal-500 to-teal-700 shadow-lg shadow-teal-500/25"
-          >
-            <HeartPulse className="h-8 w-8 text-white" aria-hidden="true" />
-          </motion.div>
         </Link>
       </div>
 
