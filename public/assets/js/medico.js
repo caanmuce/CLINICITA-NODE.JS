@@ -71,19 +71,35 @@
 
         try {
             const fecha = inputFecha.value;
-            // encodeURIComponent evita que caracteres raros rompan la URL.
-            // CAMBIO (Opción A): GET /api/citas/medico del servidor del equipo (con síntomas y puede_marcar).
             const datos = await api(`/citas/medico${fecha ? `?fecha=${encodeURIComponent(fecha)}` : ""}`);
-            if (!datos || miTurno !== turno) return; // sesión vencida o respuesta vieja
+            console.log("respuesta agenda:", datos);
+            if (!datos || miTurno !== turno) return;
 
-            hoyServidor = datos.hoy;
-            inputFecha.value = datos.fecha;
+            const hoyLocal = new Date().toLocaleDateString("en-CA"); // yyyy-MM-dd
+            const kpis = datos.kpis || {};
+            const normalizado = {
+                hoy: datos.hoy || hoyLocal,
+                fecha: datos.fecha || fecha || hoyLocal,
+                medico: datos.medico || { nombre_completo: "Médico", especialidad: "" },
+                citas: datos.citas || [],
+                resumen: datos.resumen || {
+                    Confirmada: kpis.confirmadas,
+                    Pendiente: kpis.pendientes,
+                    Cancelada: kpis.canceladas,
+                    Completada: kpis.atendidas,
+                    "No-Asistio": kpis.inasistencias
+                }
+            };
 
-            pintarEncabezado(datos);
-            pintarResumen(datos.resumen);
-            pintarTabla(datos.citas);
+            hoyServidor = normalizado.hoy;
+            inputFecha.value = normalizado.fecha;
+
+            pintarEncabezado(normalizado);
+            pintarResumen(normalizado.resumen);
+            pintarTabla(normalizado.citas);
             document.getElementById("ultima-actualizacion").textContent =
                 `Actualizado a las ${new Date().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}`;
+            `Actualizado a las ${new Date().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}`;
         } catch (error) {
             if (miTurno !== turno) return;
             if (!silencioso) {
@@ -98,14 +114,15 @@
     // =====================================================================
 
     /** Nombre del médico, especialidad y fecha en letras. */
-    function pintarEncabezado({ medico, fecha, hoy }) {
-        document.getElementById("medico-info").textContent = `${medico.nombre_completo} · ${medico.especialidad}`;
-        const titulo = document.getElementById("titulo-fecha");
-        titulo.replaceChildren(formatearFecha(fecha));
-        if (fecha === hoy) {
-            titulo.append(" ", el("span", { clase: "insignia estado-confirmada ms-1", texto: "Hoy" }));
+        function pintarEncabezado({ medico, fecha, hoy }) {
+            document.getElementById("medico-info").textContent =
+                [medico.nombre_completo, medico.especialidad].filter(Boolean).join(" · ");
+            const titulo = document.getElementById("titulo-fecha");
+            titulo.replaceChildren(formatearFecha(fecha));
+            if (fecha === hoy) {
+                titulo.append(" ", el("span", { clase: "insignia estado-confirmada ms-1", texto: "Hoy" }));
+            }
         }
-    }
 
     /** Las cinco tarjetas de arriba. */
     function pintarResumen(resumen) {
