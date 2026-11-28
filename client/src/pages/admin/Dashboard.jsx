@@ -199,13 +199,13 @@ export const AdminDashboard = () => {
       label: "Lista de espera",
       href: "/admin/lista-espera",
       icon: AlertCircle,
-      color: "bg-yellow-600 hover:bg-yellow-700",
+      color: "bg-teal-600 hover:bg-teal-700",
     },
     {
       label: "Configuración",
       href: "/admin/usuarios",
       icon: HeartPulse,
-      color: "bg-purple-600 hover:bg-purple-700",
+      color: "bg-teal-600 hover:bg-teal-700",
     },
   ];
 
@@ -279,7 +279,7 @@ export const AdminDashboard = () => {
             <h2 className="text-lg font-semibold text-gray-900 mb-4">
               Accesos rapidos
             </h2>
-            <StaggerContainer className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+            <StaggerContainer className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {quickActions.map((action, index) => (
                 <QuickAction
                   key={index}
@@ -378,3 +378,5 @@ export const AdminDashboard = () => {
     </SlideUp>
   );
 };
+
+
