@@ -292,13 +292,13 @@ export const PacienteDashboard = () => {
       label: "Lista de espera",
       href: "/paciente/lista-espera",
       icon: AlertCircle,
-      color: "bg-yellow-600 hover:bg-yellow-700",
+      color: "bg-teal-600 hover:bg-teal-700",
     },
     {
       label: "Completar pre-consulta",
       href: "/paciente/preconsulta",
       icon: User,
-      color: "bg-purple-600 hover:bg-purple-700",
+      color: "bg-teal-600 hover:bg-teal-700",
     },
   ];
 
