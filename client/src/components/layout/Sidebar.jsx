@@ -120,7 +120,7 @@ export const Sidebar = ({ collapsed = false, onToggle }) => {
                 >
                   CliniCita
                 </motion.span>
-                <motion.div className="p-2 rounded-2xl bg-gradient-to-br from-teal-500 to-teal-700 shadow-lg shadow-teal-500/25">
+                <motion.div whileHover={{scale: 1.1, rotate: 5}} whileTap={{scale: 0.95}} className="p-2 rounded-2xl bg-gradient-to-br from-teal-500 to-teal-700 shadow-lg shadow-teal-500/25">
                   <HeartPulse className="h-8 w-8 text-white" aria-hidden="true" />
                 </motion.div>
               </>
