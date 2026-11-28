@@ -16,6 +16,7 @@ import {
   BarChart,
   ArrowLeft,
   Settings,
+  HeartPulse,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -119,7 +120,9 @@ export const Sidebar = ({ collapsed = false, onToggle }) => {
                 >
                   CliniCita
                 </motion.span>
-                <Home className="h-4 w-4 text-teal-600" aria-hidden="true" />
+                <motion.div className="p-2 rounded-2xl bg-gradient-to-br from-teal-500 to-teal-700 shadow-lg shadow-teal-500/25">
+                  <HeartPulse className="h-8 w-8 text-white" aria-hidden="true" />
+                </motion.div>
               </>
             )}
           </AnimatePresence>
