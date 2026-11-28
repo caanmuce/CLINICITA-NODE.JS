@@ -1,7 +1,7 @@
 // src/components/layout/Sidebar.jsx
 
 import React, { useState, useEffect } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, Link } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import {
   Home,
@@ -102,19 +102,28 @@ export const Sidebar = ({ collapsed = false, onToggle }) => {
     >
       {/* Logo / Brand */}
       <div className="flex items-center justify-between h-16 px-4 border-b border-gray-200">
-        <AnimatePresence mode="wait">
-          {!collapsed && mounted && (
-            <motion.span
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.2 }}
-              className="text-xl font-bold text-teal-600 whitespace-nowrap"
-            >
-              CliniCita
-            </motion.span>
-          )}
-        </AnimatePresence>
+        <Link
+          to="/"
+          className="flex items-center gap-2 hover:text-teal-700 transition-colors"
+          title="Ir al inicio"
+        >
+          <AnimatePresence mode="wait">
+            {!collapsed && mounted && (
+              <>
+                <motion.span
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  transition={{ duration: 0.2 }}
+                  className="text-xl font-bold text-teal-600 whitespace-nowrap"
+                >
+                  CliniCita
+                </motion.span>
+                <Home className="h-4 w-4 text-teal-600" aria-hidden="true" />
+              </>
+            )}
+          </AnimatePresence>
+        </Link>
         <button
           onClick={onToggle}
           className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors flex-shrink-0"
