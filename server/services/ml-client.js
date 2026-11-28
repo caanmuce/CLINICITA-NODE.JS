@@ -5,6 +5,7 @@
 const axios = require("axios");
 
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "http://localhost:8000";
+const ML_SERVICE_SECRET_KEY = process.env.ML_SERVICE_SECRET_KEY;
 const ML_TIMEOUT = 5000;
 const CB_FAILURE_THRESHOLD = 3;
 const CB_COOLDOWN_MS = 30_000;
@@ -16,7 +17,10 @@ class MLClient {
     constructor() {
         this.client = axios.create({
             baseURL: ML_SERVICE_URL,
-            timeout: ML_TIMEOUT
+            timeout: ML_TIMEOUT,
+            headers: ML_SERVICE_SECRET_KEY
+                ? { "X-API-Key": ML_SERVICE_SECRET_KEY }
+                : {}
         });
         this._cbState = CB_CLOSED;
         this._cbFailures = 0;
@@ -26,6 +30,8 @@ class MLClient {
 
     _esFalloDeCircuito(error) {
         const status = error.response?.status;
+        // 401 y 403 son errores de autenticación: no se reintentan ni se tratan como caída del servicio
+        if (status === 401 || status === 403) return false;
         if (status === 404 || status === 409) return false;
         if (status >= 500 && status <= 599) return true;
         return !status && ["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN", "ERR_NETWORK", "ECONNABORTED", "ERR_CANCELED", "UND_ERR_CONNECT_TIMEOUT"].includes(error.code);

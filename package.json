@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "start": "node server\\server.js",
-    "lint": "eslint server test_server.js public\\assets\\js",
+    "lint": "eslint server test_server.js",
     "format": "prettier --write package.json eslint.config.mjs",
     "format:check": "prettier --check package.json eslint.config.mjs",
     "check:node": "node --check server\\server.js && node --check server\\conexion.js && node --check server\\services\\ml-client.js && node --check server\\servicios\\whatsapp.js && node --check server\\servicios\\sms.js && node --check test_server.js",
@@ -31,7 +31,7 @@
   },
   "devDependencies": {
     "eslint": "^10.13.0",
-    "prettier": "^3.9.10"
+    "prettier": "^3.10.1"
   },
   "allowScripts": {
     "node@26.8.2": true,
